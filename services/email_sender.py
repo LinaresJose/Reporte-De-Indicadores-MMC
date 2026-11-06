@@ -22,7 +22,8 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_SENDER_EMAIL = "sistemasmmc001@gmail.com"
+DEFAULT_SENDER_EMAIL = "sistemas3.mmcve@gmail.com"
+DEFAULT_SENDER_NAME = "Materiales Modernos de Construcción"
 GMAIL_SMTP_SERVER = "smtp.gmail.com"
 GMAIL_SMTP_PORT = 587  # STARTTLS
 

@@ -361,11 +361,11 @@ class LynxApp(tk.Tk):
         row1 = ttk.Frame(cfg_frame)
         row1.pack(fill="x", pady=2)
         ttk.Label(row1, text="Correo Remitente:", width=20, anchor="w").pack(side="left")
-        self._email_sender_var = tk.StringVar(value="sistemasmmc001@gmail.com")
+        self._email_sender_var = tk.StringVar(value="sistemas3.mmcve@gmail.com")
         ttk.Entry(row1, textvariable=self._email_sender_var, width=32).pack(side="left", padx=5)
 
         ttk.Label(row1, text="Contraseña de Aplicación:", width=24, anchor="w").pack(side="left", padx=(15, 0))
-        self._email_pass_var = tk.StringVar(value="")
+        self._email_pass_var = tk.StringVar(value="zymz wtjv rodt rpyu")
         ttk.Entry(row1, textvariable=self._email_pass_var, show="•", width=22).pack(side="left", padx=5)
 
         ttk.Button(row1, text="Probar Conexión", command=self._test_email_connection, width=16).pack(side="left", padx=10)
@@ -432,7 +432,7 @@ class LynxApp(tk.Tk):
         ).pack(side="left", padx=(0, 10))
 
         ttk.Label(row_actions, text="Correo de prueba:", width=16, anchor="w").pack(side="left")
-        self._email_test_var = tk.StringVar(value="sistemasmmc001@gmail.com")
+        self._email_test_var = tk.StringVar(value="sistemas3.mmcve@gmail.com")
         ttk.Entry(row_actions, textvariable=self._email_test_var, width=28).pack(side="left", padx=5)
 
         ttk.Button(
