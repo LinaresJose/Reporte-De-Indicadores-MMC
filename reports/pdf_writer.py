@@ -1,4 +1,4 @@
-"""reports/pdf_writer.py — LYNX Report System.
+﻿"""reports/pdf_writer.py â€” LYNX Report System.
 
 Generates individual PDF performance reports for each vendor, replicating
 the visual layout of the "Individual Ventas" sheet in the original
@@ -7,8 +7,8 @@ the visual layout of the "Individual Ventas" sheet in the original
 Each PDF is a single A4 page containing:
 
 - **Header banner:** dark-blue with LYNX logo text, month, and vendor name.
-- **Identity block:** Zona, Región, Comisionista.
-- **KPI sections (4):** VENTAS, ACTIVACIÓN, SKUs, COBRANZA — each showing
+- **Identity block:** Zona, RegiÃ³n, Comisionista.
+- **KPI sections (4):** VENTAS, ACTIVACIÃ“N, SKUs, COBRANZA â€” each showing
   the budget target, achieved value, alcance %, points earned, and a
   colour-coded progress bar.
 - **Total Indicadores box:** summed points + overall ranking position.
@@ -46,18 +46,18 @@ logger = logging.getLogger(__name__)
 _PDF_SUBDIR = "PDF_INDICADORES"
 
 # Colour palette (R, G, B)
-_CLR_NAVY     = (31,  56, 100)   # #1F3864 — header/section backgrounds
+_CLR_NAVY     = (31,  56, 100)   # #1F3864 â€” header/section backgrounds
 _CLR_WHITE    = (255, 255, 255)
 _CLR_BLACK    = (0,   0,   0)
 _CLR_GREY_BG  = (242, 242, 242)  # alternating row bg
-_CLR_GREEN    = (39,  98,  33)   # #276221 — good alcance text
+_CLR_GREEN    = (39,  98,  33)   # #276221 â€” good alcance text
 _CLR_GREEN_BG = (198, 239, 206)  # #C6EFCE
 _CLR_YELLOW   = (156, 87,   0)   # #9C5700
 _CLR_YELLOW_BG= (255, 235, 156)  # #FFEB9C
 _CLR_RED      = (156,  0,   6)   # #9C0006
 _CLR_RED_BG   = (255, 199, 206)  # #FFC7CE
 _CLR_BAR_BG   = (220, 230, 241)  # progress bar track
-_CLR_SECTION  = (68, 114, 196)   # #4472C4 — section accent blue
+_CLR_SECTION  = (68, 114, 196)   # #4472C4 â€” section accent blue
 
 # Page margins (mm)
 _MARGIN_LEFT  = 15
@@ -105,7 +105,25 @@ def _alcance_colors(alcance: float):
 # ---------------------------------------------------------------------------
 
 
+
+def _sanitize(txt: str) -> str:
+    import unicodedata
+    if not isinstance(txt, str):
+        txt = str(txt)
+    # normalize accents to ascii
+    nfd = unicodedata.normalize('NFKD', txt)
+    clean = ''.join(c for c in nfd if not unicodedata.combining(c))
+    return clean.encode('ascii', 'replace').decode('ascii')
+
 class LynxPDF(FPDF):
+    def cell(self, *args, **kwargs):
+        if len(args) >= 3 and isinstance(args[2], str):
+            args = list(args)
+            args[2] = _sanitize(args[2])
+            args = tuple(args)
+        elif 'text' in kwargs and isinstance(kwargs['text'], str):
+            kwargs['text'] = _sanitize(kwargs['text'])
+        return super().cell(*args, **kwargs)
     """Custom FPDF subclass that adds LYNX-branded header and footer.
 
     Args:
@@ -226,7 +244,7 @@ class LynxPDF(FPDF):
         100 % visually.  Colour follows the traffic-light convention.
 
         Args:
-            alcance: Achievement ratio (0.0 – any positive float).
+            alcance: Achievement ratio (0.0 â€“ any positive float).
             width: Total bar width in mm.
         """
         h       = 4
@@ -304,9 +322,9 @@ class LynxPDF(FPDF):
 
         # ---- Identity block ----
         self._section_title("DATOS DEL COMISIONISTA")
-        self._label_value_row("Nombre / Comisionista", record.nombre.upper())
+        self._label_value_row("Nombre / Comisionista", record.vendor_name.upper())
         self._label_value_row("Zona",   record.zona)
-        self._label_value_row("Región", record.region)
+        self._label_value_row("RegiÃ³n", record.region)
         self.ln(4)
 
         # ---- KPI: VENTAS (30 pts) ----
@@ -331,11 +349,11 @@ class LynxPDF(FPDF):
             fmt_currency = False,  # shown as percentage below
         )
         # Override the last logrado/alcance display since it's already a ratio
-        # (The _kpi_section renders a progress bar based on alcance — correct)
+        # (The _kpi_section renders a progress bar based on alcance â€” correct)
 
-        # ---- KPI: ACTIVACIÓN (10 pts) ----
+        # ---- KPI: ACTIVACIÃ“N (10 pts) ----
         self._kpi_section(
-            title        = "ACTIVACIÓN DE CLIENTES  (10 puntos)",
+            title        = "ACTIVACIÃ“N DE CLIENTES  (10 puntos)",
             presupuesto  = record.presup_activacion,
             logrado      = record.clientes_activados,
             alcance      = record.alcance_activacion,
@@ -366,28 +384,28 @@ class LynxPDF(FPDF):
             bg=total_bg, fg=total_fg, bold_value=True,
         )
         self._label_value_row(
-            "Posición en el ranking",
-            f"#{record.lugar_indicadores}" if record.lugar_indicadores > 0 else "—",
+            "PosiciÃ³n en el ranking",
+            f"#{record.lugar_indicadores}" if record.lugar_indicadores > 0 else "â€”",
         )
         self.ln(4)
 
         # ---- Bonos ----
         self._section_title("BONOS")
 
-        incentivo_text = "✓ APLICA (1 % comisión extra)" if record.incentivo == "SI" else "✗ No aplica"
+        incentivo_text = "âœ“ APLICA (1 % comisiÃ³n extra)" if record.incentivo == "SI" else "âœ- No aplica"
         inc_bg = _CLR_GREEN_BG if record.incentivo == "SI" else _CLR_RED_BG
         inc_fg = _CLR_GREEN    if record.incentivo == "SI" else _CLR_RED
         self._label_value_row(
-            "Incentivo (Alcance Ventas ≥ 89.45 % y Cobranza ≥ 89.45 %)",
+            "Incentivo (Alcance Ventas â‰¥ 89.45 % y Cobranza â‰¥ 89.45 %)",
             incentivo_text,
             bg=inc_bg, fg=inc_fg, bold_value=True,
         )
 
-        rifa_text = "✓ PARTICIPA" if record.rifa == "SI" else "✗ No participa"
+        rifa_text = "âœ“ PARTICIPA" if record.rifa == "SI" else "âœ- No participa"
         rifa_bg = _CLR_GREEN_BG if record.rifa == "SI" else _CLR_RED_BG
         rifa_fg = _CLR_GREEN    if record.rifa == "SI" else _CLR_RED
         self._label_value_row(
-            "Rifa (Activación ≥ 90 % y SKUs ≥ 90 %)",
+            "Rifa (ActivaciÃ³n â‰¥ 90 % y SKUs â‰¥ 90 %)",
             rifa_text,
             bg=rifa_bg, fg=rifa_fg, bold_value=True,
         )
@@ -406,7 +424,7 @@ def generate_pdf_reports(
     """Generate one PDF performance report per vendor.
 
     Only vendors with non-zero budget (``presup_ventas > 0`` OR
-    ``presup_activacion > 0``) receive a PDF — vendors without budget targets
+    ``presup_activacion > 0``) receive a PDF â€” vendors without budget targets
     are skipped (they cannot have meaningful alcance metrics).
 
     PDFs are saved to ``output_dir / PDF_INDICADORES /``.
@@ -440,15 +458,15 @@ def generate_pdf_reports(
     for rec in records:
         # Skip vendors without budget (no meaningful report possible)
         if rec.presup_ventas == 0 and rec.presup_activacion == 0 and rec.presup_skus == 0:
-            logger.debug("Skipping PDF for '%s' — no budget.", rec.nombre)
+            logger.debug("Skipping PDF for '%s' â€” no budget.", rec.vendor_name)
             skipped += 1
             continue
 
-        safe_name = _normalize_filename(rec.nombre)
+        safe_name = _normalize_filename(rec.vendor_name)
         pdf_path  = pdf_dir / f"Indicadores_{safe_name}.pdf"
 
         try:
-            pdf = LynxPDF(mes_label=mes_label, vendor_nombre=rec.nombre)
+            pdf = LynxPDF(mes_label=mes_label, vendor_nombre=rec.vendor_name)
             pdf.add_vendor_page(rec)
             pdf.output(str(pdf_path))
             saved_paths.append(pdf_path)
@@ -456,8 +474,8 @@ def generate_pdf_reports(
 
         except Exception as exc:
             raise ReportError(
-                f"No se pudo generar el PDF para '{rec.nombre}': {exc}",
-                report_type="pdf_individual",
+                f"No se pudo generar el PDF para '{rec.vendor_name}': {exc}",
+                
             ) from exc
 
     logger.info(
@@ -466,3 +484,6 @@ def generate_pdf_reports(
         skipped,
     )
     return saved_paths
+
+
+

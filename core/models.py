@@ -455,27 +455,14 @@ class SourceFiles:
 
 @dataclass
 class AppConfig:
-    """Runtime configuration for a single LYNX report run.
-
-    Attributes:
-        output_dir: Directory path where generated report files will be saved.
-            Relative paths are resolved from the working directory at runtime.
-        mes_label: Human-readable label for the reporting month
-            (e.g. ``"Octubre 2024"``).  Used in report headers and file names.
-        anio: Four-digit reporting year.  Defaults to the current calendar
-            year as returned by :func:`datetime.date.today`.
-        threshold_incentivo: Minimum alcance (as a decimal) that both
-            ``alcance_ventas`` and ``pct_sin_vencer`` must reach for the
-            vendor to receive the monthly incentive.  Default is ``0.8945``
-            (89.45 %).
-        threshold_rifa: Minimum alcance (as a decimal) that both
-            ``alcance_activacion`` and ``alcance_skus`` must reach for the
-            vendor to qualify for the prize draw (*rifa*).  Default is
-            ``0.90`` (90 %).
-    """
+    """Runtime configuration for a single LYNX report run."""
 
     output_dir: str = "output"
     mes_label: str = ""
     anio: int = field(default_factory=lambda: datetime.date.today().year)
+    regions: list[str] = field(default_factory=lambda: [
+        "CAPITAL", "CENTRO", "OCCIDENTE", "ANDES",
+        "ORIENTE NORTE", "ORIENTE SUR", "LLANOS", "CENTRO COSTA"
+    ])
     threshold_incentivo: float = 0.8945
     threshold_rifa: float = 0.90

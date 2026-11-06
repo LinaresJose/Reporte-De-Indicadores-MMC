@@ -199,14 +199,12 @@ def load_cobranza_cierre(path: str | Path) -> Dict[str, CobranzaAgg]:
         nombre: str = row["vendedor"]
         sin_vencer: float = float(row["sin_vencer"])
         vencido: float = float(row["vencido"])
-        total: float = sin_vencer + vencido
-        pct_sin_vencer: float = sin_vencer / total if total > 0 else 0.0
 
         key = nombre.upper()
         result[key] = CobranzaAgg(
-            sin_vencer=sin_vencer,
-            vencido=vencido,
-            pct_sin_vencer=pct_sin_vencer,
+            vendor_name=nombre,
+            total_sin_vencer=sin_vencer,
+            total_vencido=vencido,
         )
 
     logger.info(

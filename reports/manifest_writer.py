@@ -1,4 +1,4 @@
-"""manifest_writer.py — LYNX Report System.
+﻿"""manifest_writer.py â€” LYNX Report System.
 
 Generates CSV manifest files that list all produced report files
 (vendor PDFs and regional Excel files), enabling easy auditing and
@@ -73,12 +73,12 @@ def _normalize_filename(text: str) -> str:
 
     Examples::
 
-        >>> _normalize_filename("María José (Ventas)")
+        >>> _normalize_filename("MarÃ­a JosÃ© (Ventas)")
         'Maria_Jose_Ventas'
         >>> _normalize_filename("ANDES & LLANOS")
         'ANDES_LLANOS'
     """
-    # Decompose unicode → remove combining diacritical marks (accents)
+    # Decompose unicode â†’ remove combining diacritical marks (accents)
     nfd = unicodedata.normalize("NFD", text)
     ascii_text = nfd.encode("ascii", "ignore").decode("ascii")
 
@@ -173,18 +173,18 @@ def write_vendor_manifest(
         # Only include vendors that have an associated PDF (i.e., have budget)
         if rec.presup_ventas == 0 and rec.presup_activacion == 0 and rec.presup_skus == 0:
             logger.debug(
-                "Skipping vendor '%s' from manifest — no budget assigned.", rec.nombre
+                "Skipping vendor '%s' from manifest â€” no budget assigned.", rec.vendor_name
             )
             continue
 
-        safe_name = _normalize_filename(rec.nombre)
+        safe_name = _normalize_filename(rec.vendor_name)
         pdf_filename = f"Indicadores_{safe_name}.pdf"
         relative_path = str(Path(pdf_subdir) / pdf_filename)
 
         rows.append(
             [
                 relative_path,
-                rec.nombre,
+                rec.vendor_name,
                 rec.zona,
                 rec.region,
                 timestamp,
@@ -248,3 +248,4 @@ def write_regional_manifest(
         "Regional manifest written: %s (%d regions)", manifest_path.name, len(rows)
     )
     return manifest_path
+

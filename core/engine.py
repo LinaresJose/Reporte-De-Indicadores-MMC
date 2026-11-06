@@ -214,53 +214,39 @@ def calculate_general(
     por_facturar: Dict[str, PorFacturarAgg],
     backorder: Dict[str, BackorderAgg],
     presupuestos: Dict[str, BudgetRecord],
+    cobranza_override: Optional[Dict[str, CobranzaAgg]] = None,
 ) -> List[VendorRecord]:
-    """Build all vendor records and compute rankings and participaciÃ³n.
-
-    Iterates over every vendor in *zonas* (the master catalogue), looks up
-    their data from each aggregation dict (substituting ``None`` if the vendor
-    had no activity in a given source), builds a :class:`VendorRecord`, then
-    post-processes rankings and market-share percentages.
-
-    Args:
-        zonas: Master vendor catalogue (from :func:`core.etl.read_zonas`).
-        facturado: Output of :func:`core.etl.read_facturado`.
-        pedidos: Output of :func:`core.etl.read_pedidos`.
-        devoluciones: Output of :func:`core.etl.read_devoluciones`.
-        cobranza: Output of :func:`core.etl.read_por_cobrar`.
-        por_facturar: Output of :func:`core.etl.read_por_facturar`.
-        backorder: Output of :func:`core.etl.read_backorder`.
-        presupuestos: Output of :func:`core.etl.read_presupuestos`.
-
-    Returns:
-        A list of :class:`VendorRecord` objects with all 34 fields populated,
-        sorted by vendor name.
-
-    Raises:
-        EngineError: If an unexpected error occurs during record construction.
-    """
+    """Build all vendor records and compute rankings and participación."""
     records: List[VendorRecord] = []
 
+    fac_lookup = {k.upper().strip(): v for k, v in facturado.items()}
+    ped_lookup = {k.upper().strip(): v for k, v in pedidos.items()}
+    dev_lookup = {k.upper().strip(): v for k, v in devoluciones.items()}
+    cxc_lookup = {k.upper().strip(): v for k, v in cobranza.items()}
+    pf_lookup = {k.upper().strip(): v for k, v in por_facturar.items()}
+    bo_lookup = {k.upper().strip(): v for k, v in backorder.items()}
+    pres_lookup = {k.upper().strip(): v for k, v in presupuestos.items()}
+    cob_override_lookup = {k.upper().strip(): v for k, v in cobranza_override.items()} if cobranza_override else {}
+
     for name, zona_info in zonas.items():
+        key = name.upper().strip()
+        cob_entry = cob_override_lookup.get(key) or cxc_lookup.get(key)
+
         try:
             record = build_vendor_record(
                 zona_info=zona_info,
-                budget=presupuestos.get(name),
-                facturado=facturado.get(name),
-                pedidos=pedidos.get(name),
-                devoluciones=devoluciones.get(name),
-                cobranza=cobranza.get(name),
-                por_facturar=por_facturar.get(name),
-                backorder=backorder.get(name),
+                budget=pres_lookup.get(key),
+                facturado=fac_lookup.get(key),
+                pedidos=ped_lookup.get(key),
+                devoluciones=dev_lookup.get(key),
+                cobranza=cob_entry,
+                por_facturar=pf_lookup.get(key),
+                backorder=bo_lookup.get(key),
             )
             records.append(record)
         except Exception as exc:
-            raise EngineError(
-                f"Failed to build record for vendor '{name}': {exc}",
-                detail=name,
-            ) from exc
+            raise EngineError(f"Failed to build record for vendor '{name}': {exc}") from exc
 
-    # â”€â”€ Post-process: participaciÃ³n â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     total_ventas_global = sum(r.ventas_netas for r in records)
     for rec in records:
         rec.participacion = _safe_divide(rec.ventas_netas, total_ventas_global)

@@ -547,29 +547,23 @@ def read_feriados(path: str | Path) -> List[date]:
 
 
 def calculate_working_days(
-    year: int,
-    month: int,
-    feriados: List[date],
+    year: Optional[int] = None,
+    month: Optional[int] = None,
+    feriados: Optional[List[date]] = None,
 ) -> WorkingDaysInfo:
     """Calculate working-day metrics for a given month.
 
     Working days are Monday–Friday excluding dates listed in *feriados*.
-
-    The *reference date* for «days elapsed» is:
-    - **Today** if the current time is **at or after 16:30**.
-    - **Yesterday** otherwise.
-
-    This mirrors the VBA logic: ``IF(MOD(NOW(),1)>TIMEVALUE("16:30"), TODAY(), TODAY()-1)``.
-
-    Args:
-        year: The report year (e.g. 2026).
-        month: The report month (1–12).
-        feriados: List of public-holiday dates to exclude.
-
-    Returns:
-        A :class:`WorkingDaysInfo` with *dias_habiles_mes* and
-        *dias_habiles_transcurridos*.
+    If *year* or *month* are omitted, they default to current local date.
+    If *feriados* is omitted, it defaults to empty list.
     """
+    now = datetime.now()
+    if year is None:
+        year = now.year
+    if month is None:
+        month = now.month
+    if feriados is None:
+        feriados = []
     from calendar import monthrange
 
     holiday_set = set(feriados)

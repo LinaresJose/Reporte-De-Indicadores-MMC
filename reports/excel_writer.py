@@ -320,11 +320,17 @@ def _write_working_days_box(
         start_col: 1-based column for the left label column.
         dias_info: :class:`~core.models.WorkingDaysInfo` with working day counts.
     """
+    dias_restantes = max(0, dias_info.dias_habiles_mes - dias_info.dias_habiles_transcurridos)
+    pct_avance = (
+        dias_info.dias_habiles_transcurridos / dias_info.dias_habiles_mes
+        if dias_info.dias_habiles_mes > 0
+        else 0.0
+    )
     labels = [
-        ("Días hábiles del mes", dias_info.total_dias_habiles),
+        ("Días hábiles del mes", dias_info.dias_habiles_mes),
         ("Días hábiles transcurridos", dias_info.dias_habiles_transcurridos),
-        ("Días hábiles restantes", dias_info.dias_habiles_restantes),
-        ("Avance del mes", dias_info.pct_avance),
+        ("Días hábiles restantes", dias_restantes),
+        ("Avance del mes", pct_avance),
     ]
 
     box_fill   = _make_fill("DCE6F1")  # light blue

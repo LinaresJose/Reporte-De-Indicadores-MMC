@@ -11,16 +11,16 @@ from __future__ import annotations
 # Facturado / Devoluciones column names
 # (shared schema between facturado_cierre_.xlsx and devoluciones.xlsx)
 # ---------------------------------------------------------------------------
-COL_FAC_COMERCIAL: str = "Comercial"
+COL_FAC_COMERCIAL: str = "Líneas de factura/Empresa/Comercial"
 """Vendor / salesperson name column in the invoiced-sales export."""
 
-COL_FAC_SUBTOTAL: str = "Subtotal"
+COL_FAC_SUBTOTAL: str = "Líneas de factura/Subtotal"
 """Line subtotal (before taxes) column in the invoiced-sales export."""
 
-COL_FAC_NIF: str = "NIF"
+COL_FAC_NIF: str = "Líneas de factura/Empresa/NIF/Identificación fiscal"
 """Customer tax-ID column used to count unique activated clients."""
 
-COL_FAC_REF_INTERNA: str = "Referencia interna"
+COL_FAC_REF_INTERNA: str = "Líneas de factura/Producto/Referencia interna"
 """Internal product reference column used to count unique SKUs sold."""
 
 # ---------------------------------------------------------------------------
@@ -29,31 +29,31 @@ COL_FAC_REF_INTERNA: str = "Referencia interna"
 COL_PED_COMERCIAL: str = "Comercial"
 """Vendor / salesperson name column in the orders export."""
 
-COL_PED_REFERENCIA: str = "Número"
+COL_PED_REFERENCIA: str = "Referencia del pedido"
 """Order reference / number column used to count unique orders."""
 
 COL_PED_BASE_IMPONIBLE: str = "Base imponible"
 """Taxable base amount column in the orders export."""
 
-COL_PED_BACKORDER_VALUE: str = "Importe pendiente"
+COL_PED_BACKORDER_VALUE: str = "Backorder Value"
 """Pending / backorder monetary value column."""
 
 # ---------------------------------------------------------------------------
 # Cobranza (accounts-receivable) column names
 # ---------------------------------------------------------------------------
-COL_COB_COMERCIAL: str = "Comercial"
+COL_COB_COMERCIAL: str = "Comercial/Nombre"
 """Vendor name column in the accounts-receivable export."""
 
-COL_COB_FECHA_ENTREGA: str = "Fecha de vencimiento"
+COL_COB_FECHA_ENTREGA: str = "Fecha de entrega"
 """Due date column used to classify amounts as current vs. overdue."""
 
-COL_COB_IMPORTE_ADEUDADO: str = "Importe adeudado"
+COL_COB_IMPORTE_ADEUDADO: str = "Importe adeudado con signo"
 """Outstanding balance column in the accounts-receivable export."""
 
 # ---------------------------------------------------------------------------
 # Zonas column names
 # ---------------------------------------------------------------------------
-COL_ZONA_NOMBRE: str = "Comercial"
+COL_ZONA_NOMBRE: str = "Nombre"
 """Vendor name column in the zones / territories master table."""
 
 COL_ZONA_ZONA: str = "Zona"
@@ -62,7 +62,7 @@ COL_ZONA_ZONA: str = "Zona"
 COL_ZONA_CORREO: str = "Correo"
 """Vendor e-mail address column."""
 
-COL_ZONA_CODIGO: str = "Código"
+COL_ZONA_CODIGO: str = "Codigo"
 """Vendor internal code column."""
 
 COL_ZONA_REGION: str = "Región"
@@ -71,19 +71,19 @@ COL_ZONA_REGION: str = "Región"
 # ---------------------------------------------------------------------------
 # Presupuestos (budgets) column names
 # ---------------------------------------------------------------------------
-COL_PRES_NOMBRE: str = "Comercial"
+COL_PRES_NOMBRE: str = "Nombre"
 """Vendor name column in the monthly budgets table."""
 
-COL_PRES_ACTIVACION: str = "Presupuesto Activación"
+COL_PRES_ACTIVACION: str = "ACTIVACIÓN"
 """Budget target for client activations."""
 
-COL_PRES_SKU: str = "Presupuesto SKU"
+COL_PRES_SKU: str = "SKU"
 """Budget target for unique SKUs sold."""
 
-COL_PRES_VENTAS: str = "Presupuesto Ventas"
+COL_PRES_VENTAS: str = "VENTAS"
 """Budget target for net sales amount."""
 
-COL_PRES_REGION: str = "Región"
+COL_PRES_REGION: str = "Region"
 """Region column in the budgets table (mirrors COL_ZONA_REGION)."""
 
 # ---------------------------------------------------------------------------
