@@ -11,11 +11,11 @@ The manager's file format (e.g. ``NOVIEMBRE_2026.xlsx``) contains two sheets:
 
 * **Hoja1**: Historical vs. current comparison (not used for budget loading).
 * **Hoja2**: Clean budget table for the current month with columns:
-    ``Nombre``, ``Zona``, ``Región``, ``<MES>`` (gross target), ``NETO <MES>``
-    (60% net target), ``Presup. Activación``, ``Presup. SKUs``.
+    ``Nombre``, ``Zona``, ``Región``, ``<MES>`` (columna D, meta de ventas del vendedor),
+    ``NETO <MES>``, ``Presup. Activación``, ``Presup. SKUs``.
 
-The ``NETO <MES>`` column is the one mapped to ``presup_ventas`` because
-all KPI calculations are performed on the 60% net basis.
+La columna del mes (Columna D, e.g. ``NOVIEMBRE``) es la meta de ventas que debe
+cumplir el vendedor (``presup_ventas``).
 
 Typical usage::
 
@@ -168,16 +168,20 @@ def _parse_manager_sheet(df: pd.DataFrame) -> Dict[str, BudgetRecord]:
     # --- Nombre column --------------------------------------------------
     col_nombre: Optional[str] = _COL_NOMBRE if _COL_NOMBRE in df.columns else df.columns[0]
 
-    # --- Ventas: prefer NETO <MES>, fallback to gross month column ------
-    col_ventas: Optional[str] = _find_neto_column(df)
+    # --- Ventas: prefer columna del mes (columna D, e.g. NOVIEMBRE) ------
+    # Prioridad: 1) Nombre del mes (e.g. 'NOVIEMBRE') o columna D (índice 3)
+    col_ventas: Optional[str] = _find_mes_column(df)
+    if col_ventas is None and len(df.columns) > 3:
+        # Columna D directa
+        col_ventas = df.columns[3]
     if col_ventas is None:
-        col_ventas = _find_mes_column(df)
+        col_ventas = _find_neto_column(df)
     if col_ventas is None:
         col_ventas = _find_column(df, _COL_VENTAS_ALIASES)
     if col_ventas is None:
         raise MaintenanceError(
             "No se encontró columna de ventas/presupuesto en la hoja del gerente. "
-            "Se esperaba 'NETO <MES>' o un nombre de mes (e.g. 'NOVIEMBRE').",
+            "Se esperaba un nombre de mes (e.g. 'NOVIEMBRE') en la columna D.",
             maintenance_task="load_presupuestos",
         )
 
