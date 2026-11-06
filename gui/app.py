@@ -592,13 +592,13 @@ class LynxApp(tk.Tk):
 
         self._post("log", ("Calculando indicadores por vendedor…", "INFO"))
         records = calculate_general(
-            df_facturado    = df_facturado,
-            df_pedidos      = df_pedidos,
-            df_devoluciones = df_devoluciones,
-            df_cxc          = df_cxc,
-            df_por_facturar = df_por_facturar,
-            df_backorder    = df_backorder,
             zonas           = zonas,
+            facturado       = df_facturado,
+            pedidos         = df_pedidos,
+            devoluciones    = df_devoluciones,
+            cobranza        = df_cxc,
+            por_facturar    = df_por_facturar,
+            backorder       = df_backorder,
             presupuestos    = presupuestos,
             cobranza_override = cobranza_override,
         )
