@@ -476,15 +476,23 @@ class LynxApp(tk.Tk):
             messagebox.showerror("Error de Conexión", msg)
             self._log(f"✖ {msg}", "ERROR")
 
+    def _get_active_output_dir(self) -> Path:
+        """Return the current output directory from the UI entry or fallback."""
+        val = self._output_var.get().strip() if hasattr(self, "_output_var") else ""
+        if val:
+            return Path(val)
+        return self._output_dir
+
     def _verify_recipients(self) -> None:
         """Verifica la lista de comerciales, correos y PDFs generados."""
-        manifest_path = self._output_dir / "manifest_vendedores.csv" / "manifest_indicadores_vendedores.csv"
+        out_dir = self._get_active_output_dir()
+        manifest_path = out_dir / "manifest_vendedores.csv" / "manifest_indicadores_vendedores.csv"
         zonas_path = Path("data/zonas.xlsx")
-        pdf_dir = self._output_dir / "PDF_INDICADORES"
+        pdf_dir = out_dir / "PDF_INDICADORES"
 
         if not manifest_path.exists():
             # Intentar ruta alternativa
-            alt_m = self._output_dir / "manifest_indicadores_vendedores.csv"
+            alt_m = out_dir / "manifest_indicadores_vendedores.csv"
             if alt_m.exists():
                 manifest_path = alt_m
 
@@ -527,7 +535,8 @@ class LynxApp(tk.Tk):
         )
 
         # Buscar cualquier PDF generado en el directorio de salida
-        pdf_dir = self._output_dir / "PDF_INDICADORES"
+        out_dir = self._get_active_output_dir()
+        pdf_dir = out_dir / "PDF_INDICADORES"
         muestra_pdf = None
         if pdf_dir.exists():
             pdfs = list(pdf_dir.glob("*.pdf"))
@@ -558,9 +567,10 @@ class LynxApp(tk.Tk):
             messagebox.showwarning("Falta Contraseña", "Ingrese la Contraseña de Aplicación de Gmail.")
             return
 
-        manifest_path = self._output_dir / "manifest_vendedores.csv" / "manifest_indicadores_vendedores.csv"
+        out_dir = self._get_active_output_dir()
+        manifest_path = out_dir / "manifest_vendedores.csv" / "manifest_indicadores_vendedores.csv"
         if not manifest_path.exists():
-            alt_m = self._output_dir / "manifest_indicadores_vendedores.csv"
+            alt_m = out_dir / "manifest_indicadores_vendedores.csv"
             if alt_m.exists():
                 manifest_path = alt_m
 
@@ -568,7 +578,7 @@ class LynxApp(tk.Tk):
             messagebox.showwarning("Reportes no encontrados", "Primero genere los reportes desde la pestaña 'Generar Reportes'.")
             return
 
-        dests = map_vendors_to_pdfs_and_emails(manifest_path, Path("data/zonas.xlsx"), self._output_dir / "PDF_INDICADORES")
+        dests = map_vendors_to_pdfs_and_emails(manifest_path, Path("data/zonas.xlsx"), out_dir / "PDF_INDICADORES")
         listos = [d for d in dests if d["email"] and d["existe_pdf"] == "True"]
 
         confirm = messagebox.askyesno(
