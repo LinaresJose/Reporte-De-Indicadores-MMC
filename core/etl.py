@@ -76,7 +76,9 @@ def _load_workbook(path: str | Path, sheet_index: int = 0) -> pd.DataFrame:
 def _validate_columns(
     df: pd.DataFrame,
     required: list[str],
-    source_name: str,
+    source_name: str = "",
+    source_file: str = "",
+    sheet_name: str = "",
 ) -> None:
     """Assert that all required columns exist in *df* and that it has data.
 
@@ -95,12 +97,7 @@ def _validate_columns(
     if missing:
         raise MissingColumnError(
             column_name=", ".join(missing),
-            detail=f"Source: {source_name}",
-        )
-    if df.empty:
-        raise EmptySourceError(
-            f"Source file '{source_name}' has no data rows.",
-            detail=source_name,
+            detail=f"Source: {source_name or source_file}",
         )
 
 
@@ -464,12 +461,18 @@ def read_zonas(path: str | Path) -> Dict[str, ZonaInfo]:
 def read_presupuestos(path: str | Path) -> Dict[str, BudgetRecord]:
     """Read the monthly budget targets file (``presupuestos.xlsx``).
 
+    Accepts the canonical format saved by ``budget_loader.save_presupuestos_config``:
+    columns ``Nombre``, ``VENTAS``, ``ACTIVACIÓN``, ``SKU``, ``Region``.
+
+    For loading the manager's raw monthly file (``NOVIEMBRE_2026.xlsx``),
+    use :func:`maintenance.budget_loader.load_presupuestos` instead, which
+    detects and parses the two-sheet manager format automatically.
+
     Args:
-        path: Path to the budget Excel file provided by the manager.
-            Expected columns match ``config.COL_PRES_*``.
+        path: Path to the canonical budget Excel file (``data/presupuestos.xlsx``).
 
     Returns:
-        Dictionary keyed by stripped vendor name → :class:`BudgetRecord`.
+        Dictionary keyed by stripped vendor name (upper-cased) → :class:`BudgetRecord`.
 
     Raises:
         ETLError: On file access or format errors.
@@ -477,30 +480,51 @@ def read_presupuestos(path: str | Path) -> Dict[str, BudgetRecord]:
         EmptySourceError: If the file has no data rows.
     """
     df = _load_workbook(path)
-    required = [
-        config.COL_PRES_NOMBRE,
-        config.COL_PRES_ACTIVACION,
-        config.COL_PRES_SKU,
-        config.COL_PRES_VENTAS,
-        config.COL_PRES_REGION,
-    ]
-    _validate_columns(df, required, Path(path).name)
 
-    df[config.COL_PRES_NOMBRE] = df[config.COL_PRES_NOMBRE].astype(str).str.strip()
-    df = df[df[config.COL_PRES_NOMBRE].notna() & (df[config.COL_PRES_NOMBRE] != "") & (df[config.COL_PRES_NOMBRE].str.lower() != "nan")]
+    # Flexible column aliases for the canonical presupuestos.xlsx format
+    _ventas_aliases = ["VENTAS", "Ventas", "ventas", "Meta Ventas"]
+    _activacion_aliases = ["ACTIVACIÓN", "ACTIVACION", "Activación", "activacion",
+                           "Meta Activación", "Presup. Activación", "Presup. Activacion"]
+    _sku_aliases = ["SKU", "SKUs", "SKUS", "sku", "Meta SKUs", "Presup. SKUs", "Presup. SKU"]
+    _region_aliases = ["Region", "REGION", "Región", "REGIÓN", "region"]
 
-    for col in [config.COL_PRES_ACTIVACION, config.COL_PRES_SKU, config.COL_PRES_VENTAS]:
+    def _pick(df: pd.DataFrame, aliases: list) -> str | None:
+        for a in aliases:
+            if a in df.columns:
+                return a
+        return None
+
+    col_nombre = config.COL_PRES_NOMBRE if config.COL_PRES_NOMBRE in df.columns else df.columns[0]
+    col_ventas = _pick(df, _ventas_aliases)
+    col_activacion = _pick(df, _activacion_aliases)
+    col_sku = _pick(df, _sku_aliases)
+    col_region = _pick(df, _region_aliases)
+
+    missing = [n for n, c in [("VENTAS", col_ventas), ("ACTIVACION", col_activacion), ("SKU", col_sku)] if c is None]
+    if missing:
+        raise MissingColumnError(
+            source=Path(path).name,
+            missing_columns=missing,
+        )
+
+    df[col_nombre] = df[col_nombre].astype(str).str.strip()
+    df = df[df[col_nombre].notna() & (df[col_nombre] != "") & (df[col_nombre].str.lower() != "nan")]
+
+    for col in filter(None, [col_ventas, col_activacion, col_sku]):
         df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
 
     result: Dict[str, BudgetRecord] = {}
     for _, row in df.iterrows():
-        name = str(row[config.COL_PRES_NOMBRE]).strip()
-        result[name] = BudgetRecord(
+        name = str(row[col_nombre]).strip()
+        if not name or name.lower() == "nan":
+            continue
+        region_val = str(row[col_region]).strip().upper() if col_region and pd.notna(row.get(col_region)) else ""
+        result[name.upper()] = BudgetRecord(
             vendor_name=name,
-            presup_activacion=float(row[config.COL_PRES_ACTIVACION]),
-            presup_skus=float(row[config.COL_PRES_SKU]),
-            presup_ventas=float(row[config.COL_PRES_VENTAS]),
-            region=str(row.get(config.COL_PRES_REGION, "")).strip().upper(),
+            presup_activacion=float(row[col_activacion]),
+            presup_skus=float(row[col_sku]),
+            presup_ventas=float(row[col_ventas]),
+            region=region_val,
         )
 
     logger.info("read_presupuestos: %d budget records loaded.", len(result))

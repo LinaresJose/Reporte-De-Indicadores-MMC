@@ -190,6 +190,16 @@ class WorkingDaysInfo:
     dias_habiles_transcurridos: int
 
     @property
+    def total_dias_habiles(self) -> int:
+        """Alias for dias_habiles_mes."""
+        return self.dias_habiles_mes
+
+    @property
+    def dias_habiles_restantes(self) -> int:
+        """Working days remaining in the month."""
+        return max(0, self.dias_habiles_mes - self.dias_habiles_transcurridos)
+
+    @property
     def pct_transcurrido(self) -> float:
         """Fraction of the month's working days that have elapsed.
 
@@ -201,6 +211,11 @@ class WorkingDaysInfo:
         if self.dias_habiles_mes == 0:
             return 0.0
         return self.dias_habiles_transcurridos / self.dias_habiles_mes
+
+    @property
+    def pct_avance(self) -> float:
+        """Alias for pct_transcurrido."""
+        return self.pct_transcurrido
 
 
 # ---------------------------------------------------------------------------
