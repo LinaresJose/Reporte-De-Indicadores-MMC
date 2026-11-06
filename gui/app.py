@@ -60,6 +60,7 @@ from maintenance.cobranza_loader import load_cobranza_cierre
 from reports.excel_writer import generate_excel_report
 from reports.manifest_writer import write_regional_manifest, write_vendor_manifest
 from reports.pdf_writer import generate_pdf_reports
+from services.email_sender import EmailSender, get_default_templates, map_vendors_to_pdfs_and_emails
 
 logger = logging.getLogger(__name__)
 
@@ -160,14 +161,17 @@ class LynxApp(tk.Tk):
 
         self._tab_import    = ttk.Frame(notebook, padding=10)
         self._tab_reports   = ttk.Frame(notebook, padding=10)
+        self._tab_email     = ttk.Frame(notebook, padding=10)
         self._tab_maint     = ttk.Frame(notebook, padding=10)
 
         notebook.add(self._tab_import,  text="📂  Importar Datos")
         notebook.add(self._tab_reports, text="📊  Generar Reportes")
+        notebook.add(self._tab_email,   text="📧  Envío de Correos")
         notebook.add(self._tab_maint,   text="🔧  Mantenimiento")
 
         self._build_import_tab()
         self._build_reports_tab()
+        self._build_email_tab()
         self._build_maintenance_tab()
 
         # ---- Bottom area: progress + log ----------------------------
@@ -348,6 +352,264 @@ class LynxApp(tk.Tk):
             width=25,
         ).pack(anchor="w", pady=(6, 0))
 
+    def _build_email_tab(self) -> None:
+        """Construct the 'Envío de Correos' tab widgets."""
+        # --- Configuración del Remitente ---
+        cfg_frame = SectionFrame(self._tab_email, "1. Configuración de Cuenta Gmail (Remitente)")
+        cfg_frame.pack(fill="x", pady=(0, 10))
+
+        row1 = ttk.Frame(cfg_frame)
+        row1.pack(fill="x", pady=2)
+        ttk.Label(row1, text="Correo Remitente:", width=20, anchor="w").pack(side="left")
+        self._email_sender_var = tk.StringVar(value="sistemasmmc001@gmail.com")
+        ttk.Entry(row1, textvariable=self._email_sender_var, width=32).pack(side="left", padx=5)
+
+        ttk.Label(row1, text="Contraseña de Aplicación:", width=24, anchor="w").pack(side="left", padx=(15, 0))
+        self._email_pass_var = tk.StringVar(value="")
+        ttk.Entry(row1, textvariable=self._email_pass_var, show="•", width=22).pack(side="left", padx=5)
+
+        ttk.Button(row1, text="Probar Conexión", command=self._test_email_connection, width=16).pack(side="left", padx=10)
+
+        help_lbl = ttk.Label(
+            cfg_frame,
+            text="ℹ Nota: Debe usar una 'Contraseña de Aplicación' de 16 caracteres generada en su cuenta Google, NO la clave habitual.",
+            font=("Segoe UI", 8, "italic"),
+            foreground="#666666",
+        )
+        help_lbl.pack(anchor="w", pady=(2, 0))
+
+        # --- Tipo de Reporte y Plantilla ---
+        msg_frame = SectionFrame(self._tab_email, "2. Modo de Envío y Mensaje")
+        msg_frame.pack(fill="x", pady=(0, 10))
+
+        row_mode = ttk.Frame(msg_frame)
+        row_mode.pack(fill="x", pady=4)
+        ttk.Label(row_mode, text="Tipo de Reporte:", width=20, anchor="w").pack(side="left")
+
+        self._email_tipo_var = tk.StringVar(value="parcial")
+        r1 = ttk.Radiobutton(
+            row_mode,
+            text="Mes en Curso (de lo que va del mes)",
+            variable=self._email_tipo_var,
+            value="parcial",
+            command=self._update_email_templates,
+        )
+        r1.pack(side="left", padx=(0, 15))
+
+        r2 = ttk.Radiobutton(
+            row_mode,
+            text="Cierre de Mes (definitivo)",
+            variable=self._email_tipo_var,
+            value="cierre",
+            command=self._update_email_templates,
+        )
+        r2.pack(side="left")
+
+        # Asunto
+        row_sub = ttk.Frame(msg_frame)
+        row_sub.pack(fill="x", pady=4)
+        ttk.Label(row_sub, text="Asunto del Correo:", width=20, anchor="w").pack(side="left")
+        self._email_subject_var = tk.StringVar()
+        ttk.Entry(row_sub, textvariable=self._email_subject_var, width=65).pack(side="left", fill="x", expand=True, padx=5)
+
+        # Cuerpo
+        ttk.Label(msg_frame, text="Cuerpo del Mensaje (El nombre del comercial se personaliza automáticamente):").pack(anchor="w", pady=(6, 2))
+        self._email_body_text = tk.Text(msg_frame, height=5, font=("Segoe UI", 9), wrap="word")
+        self._email_body_text.pack(fill="x", pady=(0, 6))
+
+        # --- Destinatarios y Envío ---
+        send_frame = SectionFrame(self._tab_email, "3. Envío y Pruebas")
+        send_frame.pack(fill="x", pady=(0, 10))
+
+        row_actions = ttk.Frame(send_frame)
+        row_actions.pack(fill="x", pady=4)
+
+        ttk.Button(
+            row_actions,
+            text="Verificar Destinatarios",
+            command=self._verify_recipients,
+            width=22,
+        ).pack(side="left", padx=(0, 10))
+
+        ttk.Label(row_actions, text="Correo de prueba:", width=16, anchor="w").pack(side="left")
+        self._email_test_var = tk.StringVar(value="sistemasmmc001@gmail.com")
+        ttk.Entry(row_actions, textvariable=self._email_test_var, width=28).pack(side="left", padx=5)
+
+        ttk.Button(
+            row_actions,
+            text="Enviar Prueba",
+            command=self._send_test_email,
+            width=16,
+        ).pack(side="left", padx=5)
+
+        self._btn_send_all = ttk.Button(
+            row_actions,
+            text="✉ ENVIAR A TODOS LOS COMERCIALES",
+            command=self._start_batch_email_send,
+            style="Accent.TButton",
+            width=34,
+        )
+        self._btn_send_all.pack(side="right", padx=5)
+
+        self._update_email_templates()
+
+    def _update_email_templates(self) -> None:
+        """Actualiza el asunto y cuerpo según el modo seleccionado (parcial vs cierre)."""
+        mes_label = self._get_mes_label()
+        es_cierre = (self._email_tipo_var.get() == "cierre")
+        subj, body = get_default_templates(mes_label, es_cierre=es_cierre)
+        self._email_subject_var.set(subj)
+        self._email_body_text.delete("1.0", "end")
+        self._email_body_text.insert("1.0", body)
+
+    def _test_email_connection(self) -> None:
+        """Prueba autenticación SMTP con Gmail."""
+        sender = EmailSender(
+            sender_email=self._email_sender_var.get(),
+            sender_password=self._email_pass_var.get(),
+        )
+        ok, msg = sender.test_connection()
+        if ok:
+            messagebox.showinfo("Conexión Exitosa", msg)
+            self._log(f"✔ {msg}", "SUCCESS")
+        else:
+            messagebox.showerror("Error de Conexión", msg)
+            self._log(f"✖ {msg}", "ERROR")
+
+    def _verify_recipients(self) -> None:
+        """Verifica la lista de comerciales, correos y PDFs generados."""
+        manifest_path = self._output_dir / "manifest_vendedores.csv" / "manifest_indicadores_vendedores.csv"
+        zonas_path = Path("data/zonas.xlsx")
+        pdf_dir = self._output_dir / "PDF_INDICADORES"
+
+        if not manifest_path.exists():
+            # Intentar ruta alternativa
+            alt_m = self._output_dir / "manifest_indicadores_vendedores.csv"
+            if alt_m.exists():
+                manifest_path = alt_m
+
+        if not manifest_path.exists():
+            messagebox.showwarning(
+                "Manifiesto no encontrado",
+                "Primero debe generar los reportes en la pestaña 'Generar Reportes' para crear los PDFs y la lista de comerciales."
+            )
+            return
+
+        dests = map_vendors_to_pdfs_and_emails(manifest_path, zonas_path, pdf_dir)
+        listos = [d for d in dests if d["email"] and d["existe_pdf"] == "True"]
+        sin_correo = [d for d in dests if not d["email"]]
+        sin_pdf = [d for d in dests if d["existe_pdf"] != "True"]
+
+        self._log(f"Verificación de Destinatarios: {len(listos)} listos para enviar de un total de {len(dests)}.", "INFO")
+        if sin_correo:
+            self._log(f"Comerciales sin correo registrado ({len(sin_correo)}): {', '.join(d['nombre'] for d in sin_correo[:5])}...", "WARNING")
+        if sin_pdf:
+            self._log(f"Comerciales sin archivo PDF ({len(sin_pdf)}): {', '.join(d['nombre'] for d in sin_pdf[:5])}...", "WARNING")
+
+        messagebox.showinfo(
+            "Verificación de Destinatarios",
+            f"Total comerciales en manifiesto: {len(dests)}\n"
+            f"Listos con PDF y Correo: {len(listos)}\n"
+            f"Sin correo asignado: {len(sin_correo)}\n"
+            f"Sin PDF encontrado: {len(sin_pdf)}"
+        )
+
+    def _send_test_email(self) -> None:
+        """Envía un correo de prueba con un PDF muestra."""
+        test_email = self._email_test_var.get().strip()
+        if not test_email or "@" not in test_email:
+            messagebox.showwarning("Atención", "Ingrese una dirección de correo válida para la prueba.")
+            return
+
+        sender = EmailSender(
+            sender_email=self._email_sender_var.get(),
+            sender_password=self._email_pass_var.get(),
+        )
+
+        # Buscar cualquier PDF generado en el directorio de salida
+        pdf_dir = self._output_dir / "PDF_INDICADORES"
+        muestra_pdf = None
+        if pdf_dir.exists():
+            pdfs = list(pdf_dir.glob("*.pdf"))
+            if pdfs:
+                muestra_pdf = pdfs[0]
+
+        subject = "[PRUEBA] " + self._email_subject_var.get()
+        body = self._email_body_text.get("1.0", "end-1c")
+
+        self._log(f"Enviando correo de prueba a {test_email}...", "INFO")
+        ok, msg = sender.send_single_email(
+            to_email=test_email,
+            subject=subject,
+            body_text=body,
+            attachment_path=muestra_pdf,
+        )
+        if ok:
+            adjunto_txt = f" (Adjunto: {muestra_pdf.name})" if muestra_pdf else " (Sin adjunto)"
+            messagebox.showinfo("Éxito", f"Correo de prueba enviado a {test_email}{adjunto_txt}")
+            self._log(f"✔ Correo de prueba enviado a {test_email}", "SUCCESS")
+        else:
+            messagebox.showerror("Error de Envío", f"No se pudo enviar el correo de prueba:\n{msg}")
+            self._log(f"✖ Error enviando correo de prueba: {msg}", "ERROR")
+
+    def _start_batch_email_send(self) -> None:
+        """Inicia el envío masivo en un hilo secundario."""
+        if not self._email_pass_var.get().strip():
+            messagebox.showwarning("Falta Contraseña", "Ingrese la Contraseña de Aplicación de Gmail.")
+            return
+
+        manifest_path = self._output_dir / "manifest_vendedores.csv" / "manifest_indicadores_vendedores.csv"
+        if not manifest_path.exists():
+            alt_m = self._output_dir / "manifest_indicadores_vendedores.csv"
+            if alt_m.exists():
+                manifest_path = alt_m
+
+        if not manifest_path.exists():
+            messagebox.showwarning("Reportes no encontrados", "Primero genere los reportes desde la pestaña 'Generar Reportes'.")
+            return
+
+        dests = map_vendors_to_pdfs_and_emails(manifest_path, Path("data/zonas.xlsx"), self._output_dir / "PDF_INDICADORES")
+        listos = [d for d in dests if d["email"] and d["existe_pdf"] == "True"]
+
+        confirm = messagebox.askyesno(
+            "Confirmar Envío Masivo",
+            f"Se enviarán {len(listos)} correos individuales con su respectivo PDF adjunto.\n"
+            f"Remitente: {self._email_sender_var.get()}\n"
+            f"Asunto: {self._email_subject_var.get()}\n\n"
+            "¿Desea proceder?",
+        )
+        if not confirm:
+            return
+
+        self._set_ui_busy(True)
+        self._btn_send_all.config(state="disabled")
+
+        sender = EmailSender(
+            sender_email=self._email_sender_var.get(),
+            sender_password=self._email_pass_var.get(),
+        )
+        subject = self._email_subject_var.get()
+        body = self._email_body_text.get("1.0", "end-1c")
+
+        def worker():
+            self._log(f"Iniciando envío de {len(listos)} correos...", "INFO")
+            def on_prog(curr, tot, nom, ok, m):
+                lvl = "SUCCESS" if ok else "WARNING"
+                self._gui_queue.put(_Msg("progress", (curr, tot, f"Enviando {curr}/{tot}: {nom}")))
+                self._gui_queue.put(_Msg("log", (f"[{curr}/{tot}] {nom} → {m}", lvl)))
+
+            stats = sender.send_batch(
+                destinatarios=dests,
+                subject=subject,
+                body_template=body,
+                on_progress=on_prog,
+                delay_seconds=0.8,
+            )
+            self._gui_queue.put(_Msg("email_done", stats))
+
+        t = threading.Thread(target=worker, daemon=True)
+        t.start()
+
     # ------------------------------------------------------------------
     # UI helpers
     # ------------------------------------------------------------------
@@ -433,9 +695,17 @@ class LynxApp(tk.Tk):
                     text, level = msg.payload
                     self._log_area.append(text, level)
                 elif msg.kind == "progress":
-                    self._progress_lbl.config(text=msg.payload)
+                    if isinstance(msg.payload, tuple) and len(msg.payload) == 3:
+                        curr, tot, text = msg.payload
+                        pct = int((curr / tot) * 100) if tot > 0 else 0
+                        self._progress_bar["value"] = pct
+                        self._progress_lbl.config(text=text)
+                    else:
+                        self._progress_lbl.config(text=str(msg.payload))
                 elif msg.kind == "done":
                     self._on_worker_done(msg.payload)
+                elif msg.kind == "email_done":
+                    self._on_email_done(msg.payload)
                 elif msg.kind == "error":
                     self._on_worker_error(msg.payload)
         except queue.Empty:
@@ -762,3 +1032,19 @@ class LynxApp(tk.Tk):
                 self._post("error", f"Error al cargar cobranza cierre: {exc}")
 
         self._start_worker(_worker)
+
+    def _on_email_done(self, stats: Dict[str, int]) -> None:
+        """Callback ejecutado en el hilo principal cuando termina el envío masivo."""
+        self._set_ui_busy(False)
+        self._btn_send_all.config(state="normal")
+        self._progress_bar["value"] = 100
+        self._progress_lbl.config(text="Envío de correos completado.")
+
+        resumen = (
+            f"Proceso de Envío Finalizado:\n\n"
+            f"✔ Correos enviados con éxito: {stats.get('enviados', 0)}\n"
+            f"✖ Envíos fallidos: {stats.get('fallidos', 0)}\n"
+            f"⚠ Omitidos (sin correo o sin PDF): {stats.get('omitidos', 0)}"
+        )
+        self._log(resumen, "SUCCESS" if stats.get("fallidos", 0) == 0 else "WARNING")
+        messagebox.showinfo("Envío de Correos Finalizado", resumen)
