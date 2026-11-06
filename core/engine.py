@@ -373,6 +373,7 @@ def get_regional_totals(records: List[VendorRecord]) -> dict:
     )
 
     return {
+        "zona_count": len(records),
         "cantidad_pedidos": sum_cantidad_pedidos,
         "monto_pedidos": sum_pedidos_monto,
         "devoluciones": sum_devoluciones,

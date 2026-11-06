@@ -280,23 +280,82 @@ def _write_totals_row(
 ) -> None:
     """Write the black totals pill row.
 
+    Maps the engine's internal keys in *totals* to the 34 columns defined in
+    ``config.GENERAL_HEADERS``.
+
     Args:
         ws: Target worksheet.
         row: 1-based row number.
-        totals: Dictionary of ``{header_name: value}`` as returned by
+        totals: Dictionary of ``{metric_name: value}`` as returned by
             :func:`~core.engine.get_regional_totals`.
-        n_cols: Total number of data columns.
+        n_cols: Total number of data columns (34).
     """
     _apply_totals_style(ws, row, n_cols)
 
-    # First cell: "TOTALES" label
-    ws.cell(row=row, column=1, value="TOTALES").alignment = _ALIGN_LEFT
-    ws.cell(row=row, column=1).font = _FONT_TOTALS
+    # Col 1: Label "TOTALES"
+    cell_tot = ws.cell(row=row, column=1, value="TOTALES")
+    cell_tot.alignment = _ALIGN_LEFT
+    cell_tot.font = _FONT_TOTALS
 
-    for col_idx, header in enumerate(config.GENERAL_HEADERS[:n_cols], start=1):
-        if header in totals:
-            cell = ws.cell(row=row, column=col_idx, value=totals[header])
+    # Mapping from column index (1-based) to key in totals dict
+    col_mapping: Dict[int, str] = {
+        2:  "zona_count",
+        4:  "cantidad_pedidos",
+        5:  "monto_pedidos",
+        6:  "devoluciones",
+        7:  "total_facturado",
+        8:  "ventas_netas",
+        9:  "monto_por_procesar",
+        10: "backorder",
+        11: "presup_ventas",
+        12: "diferencia_ventas",
+        13: "alcance_ventas",
+        14: "puntos_ventas",
+        15: "clientes_activados",
+        16: "presup_activacion",
+        17: "diferencia_activacion",
+        18: "alcance_activacion",
+        19: "puntos_activacion",
+        20: "skus_vendidos",
+        21: "presup_skus",
+        22: "diferencia_skus",
+        23: "alcance_skus",
+        24: "puntos_skus",
+        25: "pct_sin_vencer",
+        26: "puntos_cobranza",
+        27: "total_indicadores",
+        28: "incentivo_count",
+        33: "rifa_count",
+        34: "participacion",
+    }
+
+    # Format mapping for alcance in totals
+    alcance_cols = {13, 18, 23, 25}
+
+    for col_idx in range(2, n_cols + 1):
+        cell = ws.cell(row=row, column=col_idx)
+        key = col_mapping.get(col_idx)
+
+        if key and key in totals:
+            val = totals[key]
+            cell.value = val
+
+            # Check if this column is an alcance to colorize or style appropriately
+            if col_idx in alcance_cols and isinstance(val, (int, float)):
+                fill, font = _alcance_fill_font(float(val))
+                cell.fill = fill
+                cell.font = font
+            else:
+                cell.fill = _FILL_TOTALS
+                cell.font = _FONT_TOTALS
+
+            cell.alignment = _ALIGN_CENTER
             cell.number_format = _col_format(col_idx)
+        else:
+            # Empty / blank cell in totals (e.g. Region, Rankings)
+            cell.value = None
+            cell.fill = _FILL_TOTALS
+            cell.font = _FONT_TOTALS
 
 
 def _write_working_days_box(
