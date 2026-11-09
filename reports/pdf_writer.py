@@ -485,8 +485,9 @@ def generate_pdf_reports(
     saved_paths: List[Path] = []
 
     for rec in records:
-        # Skip vendors without budget
-        if rec.presup_ventas == 0 and rec.presup_activacion == 0 and rec.presup_skus == 0:
+        # Generate PDF for all vendors with budget OR if they are owners/management (GERENCIA)
+        es_gerencia = "GERENCIA" in str(rec.region).upper() or "GERENCIA" in str(rec.vendor_name).upper()
+        if (rec.presup_ventas == 0 and rec.presup_activacion == 0 and rec.presup_skus == 0) and not es_gerencia:
             continue
 
         safe_name = _normalize_filename(rec.vendor_name)

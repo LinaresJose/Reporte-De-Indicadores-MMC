@@ -581,9 +581,17 @@ class LynxApp(tk.Tk):
         dests = map_vendors_to_pdfs_and_emails(manifest_path, Path("data/zonas.xlsx"), out_dir / "PDF_INDICADORES")
         listos = [d for d in dests if d["email"] and d["existe_pdf"] == "True"]
 
+        # Buscar archivo de Reporte General Excel
+        excel_general = None
+        cand_excels = list(out_dir.glob("Reporte_General_*.xlsx")) + list(out_dir.glob("Reporte_General_*.xls"))
+        if cand_excels:
+            excel_general = cand_excels[0]
+
+        duenos_info = " (Incluyendo Reporte General Excel para dueños)" if excel_general else ""
+
         confirm = messagebox.askyesno(
             "Confirmar Envío Masivo",
-            f"Se enviarán {len(listos)} correos individuales con su respectivo PDF adjunto.\n"
+            f"Se enviarán {len(listos)} correos individuales con su respectivo PDF adjunto{duenos_info}.\n"
             f"Remitente: {self._email_sender_var.get()}\n"
             f"Asunto: {self._email_subject_var.get()}\n\n"
             "¿Desea proceder?",
@@ -603,6 +611,9 @@ class LynxApp(tk.Tk):
 
         def worker():
             self._log(f"Iniciando envío de {len(listos)} correos...", "INFO")
+            if excel_general:
+                self._log(f"Archivo Excel General para dueños: {excel_general.name}", "INFO")
+
             def on_prog(curr, tot, nom, ok, m):
                 lvl = "SUCCESS" if ok else "WARNING"
                 self._gui_queue.put(_Msg("progress", (curr, tot, f"Enviando {curr}/{tot}: {nom}")))
@@ -612,6 +623,7 @@ class LynxApp(tk.Tk):
                 destinatarios=dests,
                 subject=subject,
                 body_template=body,
+                general_excel_path=excel_general,
                 on_progress=on_prog,
                 delay_seconds=0.8,
             )

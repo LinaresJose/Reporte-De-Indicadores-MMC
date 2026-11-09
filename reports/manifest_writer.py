@@ -1,4 +1,4 @@
-﻿"""manifest_writer.py â€” LYNX Report System.
+"""manifest_writer.py â€” LYNX Report System.
 
 Generates CSV manifest files that list all produced report files
 (vendor PDFs and regional Excel files), enabling easy auditing and
@@ -170,8 +170,9 @@ def write_vendor_manifest(
     rows: List[List[str]] = []
 
     for rec in records:
-        # Only include vendors that have an associated PDF (i.e., have budget)
-        if rec.presup_ventas == 0 and rec.presup_activacion == 0 and rec.presup_skus == 0:
+        # Only include vendors that have an associated PDF (budget assigned or GERENCIA owners)
+        es_gerencia = "GERENCIA" in str(rec.region).upper() or "GERENCIA" in str(rec.vendor_name).upper()
+        if (rec.presup_ventas == 0 and rec.presup_activacion == 0 and rec.presup_skus == 0) and not es_gerencia:
             logger.debug(
                 "Skipping vendor '%s' from manifest â€” no budget assigned.", rec.vendor_name
             )

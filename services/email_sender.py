@@ -165,9 +165,10 @@ class EmailSender:
         to_email: str,
         subject: str,
         body_text: str,
+        attachments: Optional[List[Path]] = None,
         attachment_path: Optional[Path] = None,
     ) -> Tuple[bool, str]:
-        """Envía un correo individual con un archivo adjunto."""
+        """Envía un correo individual con uno o varios archivos adjuntos."""
         if not to_email or "@" not in to_email:
             return False, "Dirección de correo inválida o ausente."
 
@@ -178,8 +179,14 @@ class EmailSender:
 
         msg.attach(MIMEText(body_text, "plain", "utf-8"))
 
+        files_to_attach: List[Path] = []
+        if attachments:
+            files_to_attach.extend(attachments)
         if attachment_path:
-            att_path = Path(attachment_path)
+            files_to_attach.append(Path(attachment_path))
+
+        for att_path in files_to_attach:
+            att_path = Path(att_path)
             if att_path.exists():
                 ctype, encoding = mimetypes.guess_type(str(att_path))
                 if ctype is None or encoding is not None:
@@ -196,7 +203,7 @@ class EmailSender:
                 )
                 msg.attach(part)
             else:
-                return False, f"Archivo adjunto no encontrado: {att_path.name}"
+                logger.warning("Archivo adjunto no encontrado: %s", att_path)
 
         try:
             context = ssl.create_default_context()
@@ -215,6 +222,7 @@ class EmailSender:
         destinatarios: List[Dict[str, str]],
         subject: str,
         body_template: str,
+        general_excel_path: Optional[Path] = None,
         on_progress: Optional[Callable[[int, int, str, bool, str], None]] = None,
         cancel_check: Optional[Callable[[], bool]] = None,
         delay_seconds: float = 1.0,
@@ -225,6 +233,7 @@ class EmailSender:
             destinatarios: Lista retornada por `map_vendors_to_pdfs_and_emails`.
             subject: Asunto del correo.
             body_template: Cuerpo del mensaje.
+            general_excel_path: Ruta al archivo Excel General (se adjunta a los dueños/gerencia).
             on_progress: Callback `fn(current, total, vendor_name, success, msg)`.
             cancel_check: Callback que retorna True si el usuario canceló el envío.
             delay_seconds: Pausa entre envíos para respetar límites de Gmail.
@@ -234,6 +243,9 @@ class EmailSender:
         """
         stats = {"enviados": 0, "fallidos": 0, "omitidos": 0}
         total = len(destinatarios)
+
+        # Dueños / Gerencia que reciben adicionalmente el Excel General
+        OWNER_EMAILS = {"hhurtado.mmcve@gmail.com", "jatouman.mmcve@gmail.com"}
 
         context = ssl.create_default_context()
         try:
@@ -265,6 +277,17 @@ class EmailSender:
                             on_progress(idx, total, nombre, False, "PDF no encontrado")
                         continue
 
+                    # Preparar lista de adjuntos para este destinatario
+                    archivos_adjuntos = [pdf_path]
+                    es_dueno = (
+                        to_email.lower() in OWNER_EMAILS or
+                        "GERENCIA" in str(dest.get("region", "")).upper() or
+                        "GERENCIA" in nombre.upper()
+                    )
+
+                    if es_dueno and general_excel_path and Path(general_excel_path).exists():
+                        archivos_adjuntos.append(Path(general_excel_path))
+
                     # Preparar mensaje
                     msg = MIMEMultipart()
                     msg["From"] = f"MMC Sistemas <{self.sender_email}>"
@@ -273,25 +296,30 @@ class EmailSender:
 
                     # Reemplazar nombre si el template lo tiene
                     custom_body = body_template.replace("Estimado(a) Comercial,", f"Estimado(a) {nombre},")
+                    if es_dueno and general_excel_path:
+                        custom_body += "\n\nNota: Adicionalmente se adjunta el archivo Reporte General de Indicadores en formato Excel."
+
                     msg.attach(MIMEText(custom_body, "plain", "utf-8"))
 
-                    # Adjuntar PDF
-                    with open(pdf_path, "rb") as f:
-                        part = MIMEBase("application", "pdf")
-                        part.set_payload(f.read())
-                    encoders.encode_base64(part)
-                    part.add_header(
-                        "Content-Disposition",
-                        f'attachment; filename="{pdf_path.name}"',
-                    )
-                    msg.attach(part)
+                    # Adjuntar archivos
+                    for att_file in archivos_adjuntos:
+                        with open(att_file, "rb") as f:
+                            part = MIMEBase("application", "octet-stream")
+                            part.set_payload(f.read())
+                        encoders.encode_base64(part)
+                        part.add_header(
+                            "Content-Disposition",
+                            f'attachment; filename="{att_file.name}"',
+                        )
+                        msg.attach(part)
 
                     # Enviar
                     try:
                         server.send_message(msg)
                         stats["enviados"] += 1
+                        det_adj = f"{len(archivos_adjuntos)} adjuntos" if len(archivos_adjuntos) > 1 else "PDF adjunto"
                         if on_progress:
-                            on_progress(idx, total, nombre, True, f"Enviado a {to_email}")
+                            on_progress(idx, total, nombre, True, f"Enviado a {to_email} ({det_adj})")
                     except Exception as exc:
                         stats["fallidos"] += 1
                         if on_progress:
