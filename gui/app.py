@@ -694,12 +694,26 @@ class LynxApp(tk.Tk):
     # ------------------------------------------------------------------
 
     def _load_saved_state(self) -> None:
-        """Load previously saved presupuestos config if available."""
+        """Load previously saved presupuestos config and cobranza cierre if available."""
         if self._presupuestos_config.exists():
             self._log(
                 f"Presupuestos guardados encontrados: {self._presupuestos_config.name}",
                 "INFO",
             )
+
+        # Auto-detect saved cobranza cierre file in data/
+        _default_cob = _DATA_DIR / "cobranza_cierre.xlsx"
+        if _default_cob.exists() and not self._cobranza_cierre_path:
+            self._cobranza_cierre_path = str(_default_cob)
+            self._log(
+                f"Cobranza cierre encontrada: {_default_cob.name} — se aplicará al reporte.",
+                "INFO",
+            )
+            # Pre-fill the picker entry if it exists
+            try:
+                self._cob_picker.set(str(_default_cob))
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------
     # Queue polling (thread → main thread communication)
