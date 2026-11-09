@@ -64,10 +64,16 @@ _COL_VENTAS_ALIASES: List[str] = [
 _COL_ACTIVACION_ALIASES: List[str] = [
     "ACTIVACIÓN", "ACTIVACION", "Activación", "activacion",
     "Meta Activación", "Presup. Activación", "Presup. Activacion",
+    "ACT OCTUBRE", "ACT NOV", "ACT NOVIEMBRE", "ACT ENE", "ACT FEB",
+    "ACT MAR", "ACT ABR", "ACT MAY", "ACT JUN", "ACT JUL", "ACT AGO",
+    "ACT SEP", "ACT DIC", "ACT DICIEMBRE",
 ]
 _COL_SKUS_ALIASES: List[str] = [
     "SKU", "SKUs", "SKUS", "sku", "Meta SKUs",
     "PRESUPUESTO SKU", "Presup. SKUs", "Presup. SKU",
+    "SKU OCTUBRE", "SKU NOV", "SKU NOVIEMBRE", "SKU ENE", "SKU FEB",
+    "SKU MAR", "SKU ABR", "SKU MAY", "SKU JUN", "SKU JUL", "SKU AGO",
+    "SKU SEP", "SKU DIC", "SKU DICIEMBRE",
 ]
 _COL_REGION_ALIASES: List[str] = [
     "Region", "REGION", "Región", "REGIÓN", "region", "Regi\u00f3n",
