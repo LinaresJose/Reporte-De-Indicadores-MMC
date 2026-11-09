@@ -212,7 +212,12 @@ def _parse_manager_sheet(df: pd.DataFrame) -> Dict[str, BudgetRecord]:
         name = str(row[col_nombre]).strip()
         if not name or name.lower() == "nan":
             continue
-        key = name.upper()
+
+        # Normalización de alias conocidos entre presupuesto y Odoo ERP
+        if name.upper().strip() == "AMILCAR LEON":
+            name = "AMILCAR LEON(BOLIVAR)"
+
+        key = name.upper().strip()
         region_val = str(row[col_region]).strip().upper() if col_region and pd.notna(row.get(col_region)) else ""
         result[key] = BudgetRecord(
             vendor_name=name,
