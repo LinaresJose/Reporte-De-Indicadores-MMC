@@ -2,6 +2,9 @@
 
 Permite enviar a cada comercial su reporte PDF individual con asunto y cuerpo
 personalizados según sea informe parcial (durante el mes) o cierre de mes.
+
+Coordinators (COORD / SUPERVISOR) automatically receive their regional Excel
+file as an extra attachment on top of their individual PDF (if one exists).
 """
 from __future__ import annotations
 
@@ -123,6 +126,187 @@ def map_vendors_to_pdfs_and_emails(
     return destinatarios
 
 
+# ---------------------------------------------------------------------------
+# Coordinator helpers
+# ---------------------------------------------------------------------------
+
+#: Keywords that identify a coordinator/supervisor row in zonas.xlsx.
+_COORD_KEYWORDS = ("COORD", "SUPERVISOR")
+
+#: Emails of the company owners / gerencia — they receive the General Excel.
+OWNER_EMAILS: frozenset[str] = frozenset({
+    "hhurtado.mmcve@gmail.com",
+    "jatouman.mmcve@gmail.com",
+})
+
+
+def _region_to_filename_prefix(region: str) -> str:
+    """Convert a region name to the filename prefix used by generate_excel_report.
+
+    Examples:
+        "OCCIDENTE"    → "OCCIDENTE"
+        "CENTRO COSTA" → "CENTRO_COSTA"
+        "ORIENTE NORTE"→ "ORIENTE_NORTE"
+    """
+    return region.strip().upper().replace(" ", "_")
+
+
+def build_coordinator_extra_attachments(
+    zonas_file: Path,
+    regional_dir: Path,
+) -> Dict[str, List[Path]]:
+    """Build a mapping of coordinator email → list of extra file paths to attach.
+
+    Scans ``zonas.xlsx`` for rows whose *Nombre* contains 'COORD' or 'SUPERVISOR'
+    (excluding GERENCIA owners who already get the General Excel).  For each such
+    coordinator, looks for a matching regional Excel file inside *regional_dir*.
+
+    The regional file name pattern is::
+
+        <REGION_PREFIX>_Indicadores_<Mes>_<Año>.xlsx
+
+    Args:
+        zonas_file: Path to ``data/zonas.xlsx``.
+        regional_dir: Path to the ``REGIONALES/`` subfolder inside the output dir.
+
+    Returns:
+        Dict mapping lowercase email → list of :class:`~pathlib.Path` objects.
+        Only coordinators whose regional file actually exists are included.
+    """
+    result: Dict[str, List[Path]] = {}
+
+    if not zonas_file.exists() or not regional_dir.exists():
+        logger.warning(
+            "build_coordinator_extra_attachments: missing path(s) — zonas=%s regional=%s",
+            zonas_file, regional_dir,
+        )
+        return result
+
+    df = pd.read_excel(zonas_file)
+
+    # Normalise column names (handle encoding quirks like 'Región' vs 'Regi?n')
+    col_map = {}
+    for col in df.columns:
+        normalized = col.strip().lower().replace("\ufffd", "").replace("?", "")
+        col_map[col] = normalized
+    df = df.rename(columns=col_map)
+
+    for _, row in df.iterrows():
+        nombre = str(row.get("nombre", "") or "").strip().upper()
+        correo = str(row.get("correo", "") or "").strip()
+        region = str(row.get("regin", "") or row.get("region", "") or "").strip().upper()
+
+        # Skip rows that are not coordinator/supervisor, or lack email
+        is_coord = any(kw in nombre for kw in _COORD_KEYWORDS)
+        is_gerencia = "GERENCIA" in nombre
+        if not is_coord or is_gerencia or not correo or "@" not in correo:
+            continue
+
+        if not region:
+            logger.warning("Coordinator '%s' has no region in zonas.xlsx — skipping", nombre)
+            continue
+
+        prefix = _region_to_filename_prefix(region)
+        # Find matching file (glob to avoid hardcoding Mes/Año)
+        candidates = list(regional_dir.glob(f"{prefix}_Indicadores_*.xlsx"))
+        if not candidates:
+            logger.warning(
+                "No regional Excel found for coordinator '%s' (region=%s, prefix=%s) in %s",
+                nombre, region, prefix, regional_dir,
+            )
+            continue
+
+        # Pick most recently modified if multiple matches
+        excel_path = max(candidates, key=lambda p: p.stat().st_mtime)
+        result.setdefault(correo.lower(), []).append(excel_path)
+        logger.info(
+            "Coordinator '%s' (%s) → regional Excel: %s", nombre, correo, excel_path.name
+        )
+
+    return result
+
+
+def get_coordinator_dests(
+    zonas_file: Path,
+    regional_dir: Path,
+    pdf_dir: Path,
+) -> List[Dict[str, str]]:
+    """Build destination entries for coordinators who are NOT in the vendor manifest.
+
+    Coordinators typically have no (or zero) budget and are therefore absent from
+    the vendor manifest CSV.  This function reads ``zonas.xlsx`` directly to find
+    them and pairs them with their regional Excel file (as the attachment) rather
+    than an individual PDF.
+
+    Args:
+        zonas_file: Path to ``data/zonas.xlsx``.
+        regional_dir: Path to the ``REGIONALES/`` subfolder inside the output dir.
+        pdf_dir: Path to the ``PDF_INDICADORES/`` subfolder (to check for a PDF).
+
+    Returns:
+        List of destination dicts with the same keys as
+        :func:`map_vendors_to_pdfs_and_emails` output, but ``pdf_path`` is set to
+        ``""`` and ``existe_pdf`` to ``"False"`` (coordinators have no PDF unless
+        one was explicitly generated for them).  The regional Excel path is stored
+        under the ``regional_excel`` key.
+    """
+    dests: List[Dict[str, str]] = []
+
+    if not zonas_file.exists():
+        return dests
+
+    df = pd.read_excel(zonas_file)
+    col_map = {}
+    for col in df.columns:
+        normalized = col.strip().lower().replace("\ufffd", "").replace("?", "")
+        col_map[col] = normalized
+    df = df.rename(columns=col_map)
+
+    for _, row in df.iterrows():
+        nombre = str(row.get("nombre", "") or "").strip()
+        nombre_up = nombre.upper()
+        correo = str(row.get("correo", "") or "").strip()
+        zona = str(row.get("zona", "") or "").strip()
+        region = str(row.get("regin", "") or row.get("region", "") or "").strip().upper()
+
+        is_coord = any(kw in nombre_up for kw in _COORD_KEYWORDS)
+        is_gerencia = "GERENCIA" in nombre_up
+        if not is_coord or is_gerencia or not correo or "@" not in correo:
+            continue
+
+        # Look for individual PDF (may or may not exist)
+        # Strip parentheses content for a simpler filename search
+        import re
+        base_name = re.sub(r'\(.*?\)', '', nombre).strip()
+        pdf_candidates = list(pdf_dir.glob(f"*{base_name.replace(' ', '_')}*.pdf")) if pdf_dir.exists() else []
+        if not pdf_candidates:
+            pdf_candidates = list(pdf_dir.glob(f"*{base_name.split()[0]}*.pdf")) if pdf_dir.exists() else []
+
+        pdf_path_str = str(pdf_candidates[0]) if pdf_candidates else ""
+        tiene_pdf = bool(pdf_candidates and Path(pdf_path_str).exists())
+
+        # Look for regional Excel
+        prefix = _region_to_filename_prefix(region) if region else ""
+        regional_excel_str = ""
+        if prefix and regional_dir.exists():
+            reg_cands = list(regional_dir.glob(f"{prefix}_Indicadores_*.xlsx"))
+            if reg_cands:
+                regional_excel_str = str(max(reg_cands, key=lambda p: p.stat().st_mtime))
+
+        dests.append({
+            "nombre": nombre,
+            "zona": zona,
+            "region": region,
+            "email": correo,
+            "pdf_path": pdf_path_str,
+            "existe_pdf": str(tiene_pdf),
+            "regional_excel": regional_excel_str,
+            "es_coordinador": "True",
+        })
+
+    return dests
+
+
 class EmailSender:
     """Gestiona el envío de correos vía SMTP (Gmail)."""
 
@@ -223,6 +407,7 @@ class EmailSender:
         subject: str,
         body_template: str,
         general_excel_path: Optional[Path] = None,
+        extra_attachments: Optional[Dict[str, List[Path]]] = None,
         on_progress: Optional[Callable[[int, int, str, bool, str], None]] = None,
         cancel_check: Optional[Callable[[], bool]] = None,
         delay_seconds: float = 1.0,
@@ -230,10 +415,13 @@ class EmailSender:
         """Envía los correos en lote a todos los destinatarios con seguimiento.
 
         Args:
-            destinatarios: Lista retornada por `map_vendors_to_pdfs_and_emails`.
+            destinatarios: Lista retornada por `map_vendors_to_pdfs_and_emails` o
+                `get_coordinator_dests`.
             subject: Asunto del correo.
             body_template: Cuerpo del mensaje.
             general_excel_path: Ruta al archivo Excel General (se adjunta a los dueños/gerencia).
+            extra_attachments: Dict mapping lowercase email → list of extra file Paths.
+                Used to attach regional Excel files to coordinators.
             on_progress: Callback `fn(current, total, vendor_name, success, msg)`.
             cancel_check: Callback que retorna True si el usuario canceló el envío.
             delay_seconds: Pausa entre envíos para respetar límites de Gmail.
@@ -243,9 +431,7 @@ class EmailSender:
         """
         stats = {"enviados": 0, "fallidos": 0, "omitidos": 0}
         total = len(destinatarios)
-
-        # Dueños / Gerencia que reciben adicionalmente el Excel General
-        OWNER_EMAILS = {"hhurtado.mmcve@gmail.com", "jatouman.mmcve@gmail.com"}
+        extra_attachments = extra_attachments or {}
 
         context = ssl.create_default_context()
         try:
@@ -264,6 +450,8 @@ class EmailSender:
                     to_email = dest.get("email", "").strip()
                     pdf_path_str = dest.get("pdf_path", "")
                     pdf_path = Path(pdf_path_str) if pdf_path_str else None
+                    regional_excel_str = dest.get("regional_excel", "")
+                    es_coordinador = dest.get("es_coordinador", "False") == "True"
 
                     if not to_email:
                         stats["omitidos"] += 1
@@ -271,37 +459,64 @@ class EmailSender:
                             on_progress(idx, total, nombre, False, "Sin correo registrado")
                         continue
 
-                    if not pdf_path or not pdf_path.exists():
-                        stats["omitidos"] += 1
-                        if on_progress:
-                            on_progress(idx, total, nombre, False, "PDF no encontrado")
-                        continue
+                    # Coordinators: need at least a regional Excel; PDF is optional
+                    tiene_pdf = pdf_path and pdf_path.exists()
+                    tiene_regional = bool(regional_excel_str and Path(regional_excel_str).exists())
 
-                    # Preparar lista de adjuntos para este destinatario
-                    archivos_adjuntos = [pdf_path]
+                    if es_coordinador:
+                        if not tiene_pdf and not tiene_regional:
+                            stats["omitidos"] += 1
+                            if on_progress:
+                                on_progress(idx, total, nombre, False, "Sin PDF ni Excel regional")
+                            continue
+                    else:
+                        if not tiene_pdf:
+                            stats["omitidos"] += 1
+                            if on_progress:
+                                on_progress(idx, total, nombre, False, "PDF no encontrado")
+                            continue
+
+                    # Determine if this recipient is an owner (gets General Excel)
                     es_dueno = (
-                        to_email.lower() in OWNER_EMAILS or
-                        "GERENCIA" in str(dest.get("region", "")).upper() or
-                        "GERENCIA" in nombre.upper()
+                        to_email.lower() in OWNER_EMAILS
+                        or "GERENCIA" in str(dest.get("region", "")).upper()
+                        or "GERENCIA" in nombre.upper()
                     )
 
+                    # Build attachment list
+                    archivos_adjuntos: List[Path] = []
+                    if tiene_pdf:
+                        archivos_adjuntos.append(pdf_path)
                     if es_dueno and general_excel_path and Path(general_excel_path).exists():
                         archivos_adjuntos.append(Path(general_excel_path))
+                    if tiene_regional:
+                        archivos_adjuntos.append(Path(regional_excel_str))
+                    # Extra attachments from caller (e.g. regional Excel keyed by email)
+                    for extra_path in extra_attachments.get(to_email.lower(), []):
+                        extra_path = Path(extra_path)
+                        if extra_path.exists() and extra_path not in archivos_adjuntos:
+                            archivos_adjuntos.append(extra_path)
 
-                    # Preparar mensaje
+                    if not archivos_adjuntos:
+                        stats["omitidos"] += 1
+                        if on_progress:
+                            on_progress(idx, total, nombre, False, "Sin archivos adjuntos")
+                        continue
+
+                    # Prepare message
                     msg = MIMEMultipart()
                     msg["From"] = f"MMC Sistemas <{self.sender_email}>"
                     msg["To"] = to_email
                     msg["Subject"] = subject
 
-                    # Reemplazar nombre si el template lo tiene
                     custom_body = body_template.replace("Estimado(a) Comercial,", f"Estimado(a) {nombre},")
                     if es_dueno and general_excel_path:
                         custom_body += "\n\nNota: Adicionalmente se adjunta el archivo Reporte General de Indicadores en formato Excel."
+                    if tiene_regional and es_coordinador:
+                        custom_body += "\n\nNota: Se adjunta el Reporte Regional de Indicadores en formato Excel correspondiente a su zona."
 
                     msg.attach(MIMEText(custom_body, "plain", "utf-8"))
 
-                    # Adjuntar archivos
                     for att_file in archivos_adjuntos:
                         with open(att_file, "rb") as f:
                             part = MIMEBase("application", "octet-stream")
@@ -313,7 +528,7 @@ class EmailSender:
                         )
                         msg.attach(part)
 
-                    # Enviar
+                    # Send
                     try:
                         server.send_message(msg)
                         stats["enviados"] += 1

@@ -60,7 +60,7 @@ from maintenance.cobranza_loader import load_cobranza_cierre
 from reports.excel_writer import generate_excel_report
 from reports.manifest_writer import write_regional_manifest, write_vendor_manifest
 from reports.pdf_writer import generate_pdf_reports
-from services.email_sender import EmailSender, get_default_templates, map_vendors_to_pdfs_and_emails
+from services.email_sender import EmailSender, get_default_templates, map_vendors_to_pdfs_and_emails, get_coordinator_dests, build_coordinator_extra_attachments
 
 logger = logging.getLogger(__name__)
 
@@ -494,6 +494,7 @@ class LynxApp(tk.Tk):
 
         zonas_path = Path("data/zonas.xlsx")
         pdf_dir = out_dir / "PDF_INDICADORES"
+        regional_dir = out_dir / "REGIONALES"
 
         if not manifest_path.exists():
             messagebox.showwarning(
@@ -504,22 +505,40 @@ class LynxApp(tk.Tk):
             return
 
         dests = map_vendors_to_pdfs_and_emails(manifest_path, zonas_path, pdf_dir)
+        coord_dests = get_coordinator_dests(zonas_path, regional_dir, pdf_dir)
+
         listos = [d for d in dests if d["email"] and d["existe_pdf"] == "True"]
         sin_correo = [d for d in dests if not d["email"]]
         sin_pdf = [d for d in dests if d["existe_pdf"] != "True"]
+        coord_listos = [
+            d for d in coord_dests
+            if d["email"] and (d["existe_pdf"] == "True" or d.get("regional_excel"))
+        ]
 
-        self._log(f"Verificación de Destinatarios: {len(listos)} listos para enviar de un total de {len(dests)}.", "INFO")
+        self._log(
+            f"Verificación: {len(listos)} vendedores + {len(coord_listos)} coordinadores listos "
+            f"(total manifiesto: {len(dests)}).",
+            "INFO",
+        )
         if sin_correo:
-            self._log(f"Comerciales sin correo registrado ({len(sin_correo)}): {', '.join(d['nombre'] for d in sin_correo[:5])}...", "WARNING")
+            self._log(
+                f"Sin correo ({len(sin_correo)}): {', '.join(d['nombre'] for d in sin_correo[:5])}...",
+                "WARNING",
+            )
         if sin_pdf:
-            self._log(f"Comerciales sin archivo PDF ({len(sin_pdf)}): {', '.join(d['nombre'] for d in sin_pdf[:5])}...", "WARNING")
+            self._log(
+                f"Sin PDF ({len(sin_pdf)}): {', '.join(d['nombre'] for d in sin_pdf[:5])}...",
+                "WARNING",
+            )
 
         messagebox.showinfo(
             "Verificación de Destinatarios",
-            f"Total comerciales en manifiesto: {len(dests)}\n"
-            f"Listos con PDF y Correo: {len(listos)}\n"
-            f"Sin correo asignado: {len(sin_correo)}\n"
-            f"Sin PDF encontrado: {len(sin_pdf)}",
+            f"Total vendedores en manifiesto: {len(dests)}\n"
+            f"  Listos con PDF y Correo: {len(listos)}\n"
+            f"  Sin correo asignado: {len(sin_correo)}\n"
+            f"  Sin PDF encontrado: {len(sin_pdf)}\n\n"
+            f"Coordinadores/Supervisores: {len(coord_dests)}\n"
+            f"  Listos (PDF y/o Excel Regional): {len(coord_listos)}",
             parent=self,
         )
 
@@ -563,7 +582,11 @@ class LynxApp(tk.Tk):
             self._log(f"✖ Error enviando correo de prueba: {msg}", "ERROR")
 
     def _start_batch_email_send(self) -> None:
-        """Inicia el envío masivo en un hilo secundario."""
+        """Inicia el envío masivo en un hilo secundario.
+
+        Sends individual PDFs to all vendors in the manifest, plus the regional
+        Excel file to each coordinator/supervisor found in zonas.xlsx.
+        """
         if not self._email_pass_var.get().strip():
             messagebox.showwarning("Falta Contraseña", "Ingrese la Contraseña de Aplicación de Gmail.", parent=self)
             return
@@ -584,29 +607,47 @@ class LynxApp(tk.Tk):
             )
             return
 
-        dests = map_vendors_to_pdfs_and_emails(manifest_path, Path("data/zonas.xlsx"), out_dir / "PDF_INDICADORES")
+        zonas_path = Path("data/zonas.xlsx")
+        pdf_dir = out_dir / "PDF_INDICADORES"
+        regional_dir = out_dir / "REGIONALES"
+
+        # --- Vendor destinations from manifest ---
+        dests = map_vendors_to_pdfs_and_emails(manifest_path, zonas_path, pdf_dir)
         listos = [d for d in dests if d["email"] and d["existe_pdf"] == "True"]
 
-        if not listos:
+        # --- Coordinator destinations (not in manifest) ---
+        coord_dests = get_coordinator_dests(zonas_path, regional_dir, pdf_dir)
+        coord_listos = [
+            d for d in coord_dests
+            if d["email"] and (d["existe_pdf"] == "True" or d.get("regional_excel"))
+        ]
+
+        # Combined list for the batch
+        todos = dests + coord_dests
+        total_listos = len(listos) + len(coord_listos)
+
+        if total_listos == 0:
             messagebox.showwarning(
                 "Sin destinatarios listos",
-                f"Se leyeron {len(dests)} vendedores del manifiesto, pero ninguno tiene PDF generado y correo asignado.\n"
+                f"Se leyeron {len(dests)} vendedores del manifiesto y {len(coord_dests)} coordinadores, "
+                "pero ninguno tiene PDF/Excel y correo asignado.\n"
                 "Verifique que los PDFs estén en la carpeta PDF_INDICADORES.",
                 parent=self,
             )
             return
 
-        # Buscar archivo de Reporte General Excel
+        # --- General Excel for owners ---
         excel_general = None
         cand_excels = list(out_dir.glob("Reporte_General_*.xlsx")) + list(out_dir.glob("Reporte_General_*.xls"))
         if cand_excels:
             excel_general = cand_excels[0]
 
         duenos_info = f"\n(Se adjuntará también {excel_general.name} a los directores/dueños)" if excel_general else ""
+        coord_info = f"\n({len(coord_listos)} coordinadores recibirán además su Excel Regional)" if coord_listos else ""
 
         confirm = messagebox.askyesno(
             "Confirmar Envío Masivo",
-            f"Se enviarán {len(listos)} correos individuales con su respectivo PDF adjunto.{duenos_info}\n\n"
+            f"Se enviarán correos a {len(listos)} vendedores y {len(coord_listos)} coordinadores.{duenos_info}{coord_info}\n\n"
             f"Remitente: {self._email_sender_var.get()}\n"
             f"Asunto: {self._email_subject_var.get()}\n\n"
             "¿Desea iniciar el proceso de envío ahora?",
@@ -627,9 +668,17 @@ class LynxApp(tk.Tk):
 
         def worker():
             try:
-                self._gui_queue.put(_Msg("log", (f"Iniciando envío de {len(listos)} correos...", "INFO")))
+                self._gui_queue.put(_Msg("log", (
+                    f"Iniciando envío — {len(listos)} vendedores + {len(coord_listos)} coordinadores...",
+                    "INFO",
+                )))
                 if excel_general:
-                    self._gui_queue.put(_Msg("log", (f"Archivo Excel General para dueños: {excel_general.name}", "INFO")))
+                    self._gui_queue.put(_Msg("log", (f"Excel General para dueños: {excel_general.name}", "INFO")))
+                if coord_listos:
+                    self._gui_queue.put(_Msg("log", (
+                        f"Coordinadores con Excel Regional: {', '.join(d['nombre'] for d in coord_listos)}",
+                        "INFO",
+                    )))
 
                 def on_prog(curr, tot, nom, ok, m):
                     lvl = "SUCCESS" if ok else "WARNING"
@@ -637,7 +686,7 @@ class LynxApp(tk.Tk):
                     self._gui_queue.put(_Msg("log", (f"[{curr}/{tot}] {nom} → {m}", lvl)))
 
                 stats = sender.send_batch(
-                    destinatarios=dests,
+                    destinatarios=todos,
                     subject=subject,
                     body_template=body,
                     general_excel_path=excel_general,
@@ -648,7 +697,7 @@ class LynxApp(tk.Tk):
             except Exception as exc:
                 logger.error("Error en hilo de envío de correos: %s", exc, exc_info=True)
                 self._gui_queue.put(_Msg("log", (f"Error crítico en envío de correos: {exc}", "ERROR")))
-                self._gui_queue.put(_Msg("email_done", {"enviados": 0, "fallidos": len(listos), "omitidos": 0}))
+                self._gui_queue.put(_Msg("email_done", {"enviados": 0, "fallidos": total_listos, "omitidos": 0}))
 
         t = threading.Thread(target=worker, daemon=True)
         t.start()
