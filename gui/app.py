@@ -486,20 +486,20 @@ class LynxApp(tk.Tk):
     def _verify_recipients(self) -> None:
         """Verifica la lista de comerciales, correos y PDFs generados."""
         out_dir = self._get_active_output_dir()
-        manifest_path = out_dir / "manifest_vendedores.csv" / "manifest_indicadores_vendedores.csv"
+        manifest_path = out_dir / "manifest_indicadores_vendedores.csv"
+        if not manifest_path.exists():
+            alt_m = out_dir / "manifest_vendedores.csv" / "manifest_indicadores_vendedores.csv"
+            if alt_m.exists():
+                manifest_path = alt_m
+
         zonas_path = Path("data/zonas.xlsx")
         pdf_dir = out_dir / "PDF_INDICADORES"
 
         if not manifest_path.exists():
-            # Intentar ruta alternativa
-            alt_m = out_dir / "manifest_indicadores_vendedores.csv"
-            if alt_m.exists():
-                manifest_path = alt_m
-
-        if not manifest_path.exists():
             messagebox.showwarning(
                 "Manifiesto no encontrado",
-                "Primero debe generar los reportes en la pestaña 'Generar Reportes' para crear los PDFs y la lista de comerciales."
+                "Primero debe generar los reportes en la pestaña 'Generar Reportes' para crear los PDFs y la lista de comerciales.",
+                parent=self,
             )
             return
 
@@ -519,7 +519,8 @@ class LynxApp(tk.Tk):
             f"Total comerciales en manifiesto: {len(dests)}\n"
             f"Listos con PDF y Correo: {len(listos)}\n"
             f"Sin correo asignado: {len(sin_correo)}\n"
-            f"Sin PDF encontrado: {len(sin_pdf)}"
+            f"Sin PDF encontrado: {len(sin_pdf)}",
+            parent=self,
         )
 
     def _send_test_email(self) -> None:
@@ -555,31 +556,45 @@ class LynxApp(tk.Tk):
         )
         if ok:
             adjunto_txt = f" (Adjunto: {muestra_pdf.name})" if muestra_pdf else " (Sin adjunto)"
-            messagebox.showinfo("Éxito", f"Correo de prueba enviado a {test_email}{adjunto_txt}")
+            messagebox.showinfo("Éxito", f"Correo de prueba enviado a {test_email}{adjunto_txt}", parent=self)
             self._log(f"✔ Correo de prueba enviado a {test_email}", "SUCCESS")
         else:
-            messagebox.showerror("Error de Envío", f"No se pudo enviar el correo de prueba:\n{msg}")
+            messagebox.showerror("Error de Envío", f"No se pudo enviar el correo de prueba:\n{msg}", parent=self)
             self._log(f"✖ Error enviando correo de prueba: {msg}", "ERROR")
 
     def _start_batch_email_send(self) -> None:
         """Inicia el envío masivo en un hilo secundario."""
         if not self._email_pass_var.get().strip():
-            messagebox.showwarning("Falta Contraseña", "Ingrese la Contraseña de Aplicación de Gmail.")
+            messagebox.showwarning("Falta Contraseña", "Ingrese la Contraseña de Aplicación de Gmail.", parent=self)
             return
 
         out_dir = self._get_active_output_dir()
-        manifest_path = out_dir / "manifest_vendedores.csv" / "manifest_indicadores_vendedores.csv"
+        manifest_path = out_dir / "manifest_indicadores_vendedores.csv"
         if not manifest_path.exists():
-            alt_m = out_dir / "manifest_indicadores_vendedores.csv"
+            alt_m = out_dir / "manifest_vendedores.csv" / "manifest_indicadores_vendedores.csv"
             if alt_m.exists():
                 manifest_path = alt_m
 
         if not manifest_path.exists():
-            messagebox.showwarning("Reportes no encontrados", "Primero genere los reportes desde la pestaña 'Generar Reportes'.")
+            messagebox.showwarning(
+                "Reportes no encontrados",
+                f"No se encontró el manifiesto de vendedores en:\n{out_dir}\n\n"
+                "Primero genere los reportes desde la pestaña 'Generar Reportes'.",
+                parent=self,
+            )
             return
 
         dests = map_vendors_to_pdfs_and_emails(manifest_path, Path("data/zonas.xlsx"), out_dir / "PDF_INDICADORES")
         listos = [d for d in dests if d["email"] and d["existe_pdf"] == "True"]
+
+        if not listos:
+            messagebox.showwarning(
+                "Sin destinatarios listos",
+                f"Se leyeron {len(dests)} vendedores del manifiesto, pero ninguno tiene PDF generado y correo asignado.\n"
+                "Verifique que los PDFs estén en la carpeta PDF_INDICADORES.",
+                parent=self,
+            )
+            return
 
         # Buscar archivo de Reporte General Excel
         excel_general = None
@@ -587,14 +602,15 @@ class LynxApp(tk.Tk):
         if cand_excels:
             excel_general = cand_excels[0]
 
-        duenos_info = " (Incluyendo Reporte General Excel para dueños)" if excel_general else ""
+        duenos_info = f"\n(Se adjuntará también {excel_general.name} a los directores/dueños)" if excel_general else ""
 
         confirm = messagebox.askyesno(
             "Confirmar Envío Masivo",
-            f"Se enviarán {len(listos)} correos individuales con su respectivo PDF adjunto{duenos_info}.\n"
+            f"Se enviarán {len(listos)} correos individuales con su respectivo PDF adjunto.{duenos_info}\n\n"
             f"Remitente: {self._email_sender_var.get()}\n"
             f"Asunto: {self._email_subject_var.get()}\n\n"
-            "¿Desea proceder?",
+            "¿Desea iniciar el proceso de envío ahora?",
+            parent=self,
         )
         if not confirm:
             return
@@ -610,24 +626,29 @@ class LynxApp(tk.Tk):
         body = self._email_body_text.get("1.0", "end-1c")
 
         def worker():
-            self._log(f"Iniciando envío de {len(listos)} correos...", "INFO")
-            if excel_general:
-                self._log(f"Archivo Excel General para dueños: {excel_general.name}", "INFO")
+            try:
+                self._gui_queue.put(_Msg("log", (f"Iniciando envío de {len(listos)} correos...", "INFO")))
+                if excel_general:
+                    self._gui_queue.put(_Msg("log", (f"Archivo Excel General para dueños: {excel_general.name}", "INFO")))
 
-            def on_prog(curr, tot, nom, ok, m):
-                lvl = "SUCCESS" if ok else "WARNING"
-                self._gui_queue.put(_Msg("progress", (curr, tot, f"Enviando {curr}/{tot}: {nom}")))
-                self._gui_queue.put(_Msg("log", (f"[{curr}/{tot}] {nom} → {m}", lvl)))
+                def on_prog(curr, tot, nom, ok, m):
+                    lvl = "SUCCESS" if ok else "WARNING"
+                    self._gui_queue.put(_Msg("progress", (curr, tot, f"Enviando {curr}/{tot}: {nom}")))
+                    self._gui_queue.put(_Msg("log", (f"[{curr}/{tot}] {nom} → {m}", lvl)))
 
-            stats = sender.send_batch(
-                destinatarios=dests,
-                subject=subject,
-                body_template=body,
-                general_excel_path=excel_general,
-                on_progress=on_prog,
-                delay_seconds=0.8,
-            )
-            self._gui_queue.put(_Msg("email_done", stats))
+                stats = sender.send_batch(
+                    destinatarios=dests,
+                    subject=subject,
+                    body_template=body,
+                    general_excel_path=excel_general,
+                    on_progress=on_prog,
+                    delay_seconds=0.8,
+                )
+                self._gui_queue.put(_Msg("email_done", stats))
+            except Exception as exc:
+                logger.error("Error en hilo de envío de correos: %s", exc, exc_info=True)
+                self._gui_queue.put(_Msg("log", (f"Error crítico en envío de correos: {exc}", "ERROR")))
+                self._gui_queue.put(_Msg("email_done", {"enviados": 0, "fallidos": len(listos), "omitidos": 0}))
 
         t = threading.Thread(target=worker, daemon=True)
         t.start()
@@ -683,10 +704,12 @@ class LynxApp(tk.Tk):
             message: Text to display.
             level: Severity level string.
         """
-        # If called from the main thread, write directly
-        try:
-            self._log_area.append(message, level)
-        except Exception:
+        if threading.current_thread() is threading.main_thread():
+            try:
+                self._log_area.append(message, level)
+            except Exception:
+                self._gui_queue.put(_Msg("log", (message, level)))
+        else:
             self._gui_queue.put(_Msg("log", (message, level)))
 
     # ------------------------------------------------------------------
