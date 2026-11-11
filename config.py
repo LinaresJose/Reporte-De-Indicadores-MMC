@@ -134,6 +134,31 @@ INCENTIVO_RATE: float = 0.01
 DEFAULT_REGION: str = "Sin Región"
 """Fallback region label for vendors whose zone record has no region value."""
 
+# ---------------------------------------------------------------------------
+# Vendor name alias map  (Odoo name  →  canonical name in zonas.xlsx)
+#
+# When Odoo exports a vendor with a different name string than the one stored
+# in zonas.xlsx, add a mapping here.  The engine applies this map before
+# building its lookup dictionaries so that the data always gets linked to the
+# correct vendor record regardless of how Odoo labels it.
+#
+# Keys are the EXACT strings that appear in the Odoo Excel exports.
+# Values are the EXACT strings as they appear in data/zonas.xlsx  (Nombre col).
+# Matching is done case-insensitively, but prefer to keep the same casing here
+# for readability.
+# ---------------------------------------------------------------------------
+VENDOR_ALIAS: dict[str, str] = {
+    # Odoo name                              →  Canonical name in zonas.xlsx
+    "DOUGLAS GONZALEZ(FALCON-DABJ ZULIA)": "DOUGLAS GONZALEZ(DABAJURO)",
+    "MARIA NOGUERA(ZULIA-MCBO)":           "MARIA NOGUERA(MARACAIBO)",
+}
+"""Map from Odoo export vendor names → canonical vendor names in zonas.xlsx.
+
+Add a new entry here whenever an Odoo export uses a name that differs from
+the one registered in ``data/zonas.xlsx``.  The engine resolves aliases before
+building its lookup dictionaries.
+"""
+
 CUTOFF_HOUR: int = 16
 CUTOFF_MINUTE: int = 30
 """Hour and minute at which the working-day reference date rolls forward.

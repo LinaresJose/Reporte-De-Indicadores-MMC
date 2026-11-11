@@ -8,8 +8,8 @@ PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.engine import (
-    _safe_divide, _calc_alcance_puntos, build_vendor_record,
-    calculate_rankings, filter_by_region, get_regional_totals,
+    _safe_divide, _calc_alcance_puntos, _apply_vendor_aliases,
+    build_vendor_record, calculate_rankings, filter_by_region, get_regional_totals,
 )
 from core.models import (
     BackorderAgg, BudgetRecord, CobranzaAgg, DevolucionesAgg,
@@ -240,3 +240,28 @@ class TestGetRegionalTotals:
 
     def test_empty_list_returns_dict(self):
         assert isinstance(get_regional_totals([]), dict)
+
+
+class TestApplyVendorAliases:
+    def test_alias_replaces_odoo_name_with_canonical(self):
+        raw_data = {
+            "DOUGLAS GONZALEZ(FALCON-DABJ ZULIA)": "value_douglas",
+            "MARIA NOGUERA(ZULIA-MCBO)": "value_maria",
+            "VENDEDOR NORMAL": "value_normal",
+        }
+        res = _apply_vendor_aliases(raw_data)
+        assert "DOUGLAS GONZALEZ(DABAJURO)" in res
+        assert res["DOUGLAS GONZALEZ(DABAJURO)"] == "value_douglas"
+        assert "MARIA NOGUERA(MARACAIBO)" in res
+        assert res["MARIA NOGUERA(MARACAIBO)"] == "value_maria"
+        assert "VENDEDOR NORMAL" in res
+        assert res["VENDEDOR NORMAL"] == "value_normal"
+
+    def test_alias_case_insensitive(self):
+        raw_data = {
+            "douglas gonzalez(falcon-dabj zulia)": 123,
+        }
+        res = _apply_vendor_aliases(raw_data)
+        assert "DOUGLAS GONZALEZ(DABAJURO)" in res
+        assert res["DOUGLAS GONZALEZ(DABAJURO)"] == 123
+

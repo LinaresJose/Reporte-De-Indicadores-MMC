@@ -32,6 +32,30 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
+def _apply_vendor_aliases(data: dict) -> dict:
+    """Return a new dict with Odoo vendor names replaced by their canonical
+    aliases as defined in :data:`config.VENDOR_ALIAS`.
+
+    The comparison is done case-insensitively so minor casing differences in
+    the Odoo export do not break the mapping.  Keys that are not listed in the
+    alias map are kept unchanged.
+
+    Args:
+        data: Any ETL result dict keyed by vendor name string.
+
+    Returns:
+        New dict with aliased keys where applicable; original entries untouched.
+    """
+    alias_upper: dict[str, str] = {
+        k.upper().strip(): v for k, v in config.VENDOR_ALIAS.items()
+    }
+    result: dict = {}
+    for key, value in data.items():
+        canonical = alias_upper.get(key.upper().strip(), key)
+        result[canonical] = value
+    return result
+
+
 def _safe_divide(numerator: float, denominator: float) -> float:
     """Safely divide two floats, returning 0.0 when the denominator is zero.
 
@@ -218,6 +242,14 @@ def calculate_general(
 ) -> List[VendorRecord]:
     """Build all vendor records and compute rankings and participación."""
     records: List[VendorRecord] = []
+
+    # Apply vendor alias map so Odoo names are resolved to canonical zonas names
+    facturado   = _apply_vendor_aliases(facturado)
+    pedidos     = _apply_vendor_aliases(pedidos)
+    devoluciones = _apply_vendor_aliases(devoluciones)
+    cobranza    = _apply_vendor_aliases(cobranza)
+    por_facturar = _apply_vendor_aliases(por_facturar)
+    backorder   = _apply_vendor_aliases(backorder)
 
     fac_lookup = {k.upper().strip(): v for k, v in facturado.items()}
     ped_lookup = {k.upper().strip(): v for k, v in pedidos.items()}
