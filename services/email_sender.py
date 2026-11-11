@@ -194,7 +194,7 @@ def build_coordinator_extra_attachments(
     for _, row in df.iterrows():
         nombre = str(row.get("nombre", "") or "").strip().upper()
         correo = str(row.get("correo", "") or "").strip()
-        region = str(row.get("regin", "") or row.get("region", "") or "").strip().upper()
+        region = str(row.get("región", "") or row.get("regin", "") or row.get("region", "") or "").strip().upper()
 
         # Skip rows that are not coordinator/supervisor, or lack email
         is_coord = any(kw in nombre for kw in _COORD_KEYWORDS)
@@ -267,7 +267,7 @@ def get_coordinator_dests(
         nombre_up = nombre.upper()
         correo = str(row.get("correo", "") or "").strip()
         zona = str(row.get("zona", "") or "").strip()
-        region = str(row.get("regin", "") or row.get("region", "") or "").strip().upper()
+        region = str(row.get("región", "") or row.get("regin", "") or row.get("region", "") or "").strip().upper()
 
         is_coord = any(kw in nombre_up for kw in _COORD_KEYWORDS)
         is_gerencia = "GERENCIA" in nombre_up
