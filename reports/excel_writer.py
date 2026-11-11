@@ -60,9 +60,9 @@ _CLR_HEADER_FG = "FFFFFF"   # white text
 _CLR_TOTALS_BG = "000000"   # black
 _CLR_TOTALS_FG = "FFFFFF"   # white text
 _CLR_ALT_ROW   = "F2F2F2"   # very light grey (alternating rows)
-_CLR_GREEN_BG  = "C6EFCE"   # alcance ≥ 100 %
+_CLR_GREEN_BG  = "C6EFCE"   # alcance ≥ 90 %
 _CLR_GREEN_FG  = "276221"
-_CLR_YELLOW_BG = "FFEB9C"   # 80 % ≤ alcance < 100 %
+_CLR_YELLOW_BG = "FFEB9C"   # 80 % ≤ alcance < 90 %
 _CLR_YELLOW_FG = "9C5700"
 _CLR_RED_BG    = "FFC7CE"   # alcance < 80 %
 _CLR_RED_FG    = "9C0006"
@@ -165,13 +165,18 @@ def _col_format(col_index: int) -> str:
 def _alcance_fill_font(alcance: float) -> Tuple[PatternFill, Font]:
     """Return (fill, font) for an alcance value cell.
 
+    Thresholds:
+    - >= 90 % (0.90): Green
+    - >= 80 % and < 90 % (0.80 - 0.8999): Yellow
+    - < 80 % (0.80): Red
+
     Args:
         alcance: The achievement ratio (0.0 – any positive float, where 1.0 = 100 %).
 
     Returns:
         Tuple of ``(PatternFill, Font)`` reflecting the KPI colour convention.
     """
-    if alcance >= 1.0:
+    if alcance >= 0.90:
         return _FILL_GREEN, _FONT_GREEN
     if alcance >= 0.80:
         return _FILL_YELLOW, _FONT_YELLOW

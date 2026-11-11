@@ -45,9 +45,22 @@ _CLR_BLACK       = (0, 0, 0)
 _CLR_WHITE       = (255, 255, 255)
 _CLR_HEADER_GRAY = (220, 220, 220)       # Light gray for sub-headers
 _CLR_YELLOW      = (255, 255, 0)         # Yellow #FFFF00 for COMISIONISTA
-_CLR_PINK_ALERT  = (255, 199, 206)       # Soft pink/light red for < threshold alcance
-_CLR_GREEN_ALERT = (198, 239, 206)       # Soft green for >= threshold alcance
+_CLR_PINK_ALERT  = (255, 199, 206)       # Soft pink/light red for < 80% alcance (#FFC7CE)
+_CLR_YELLOW_ALERT= (255, 235, 156)       # Soft yellow for 80% <= alcance < 90% (#FFEB9C)
+_CLR_GREEN_ALERT = (198, 239, 206)       # Soft green for >= 90% alcance (#C6EFCE)
 _CLR_LINE        = (0, 0, 0)             # Black grid lines
+
+def _get_alcance_alert_color(ratio: float) -> tuple[int, int, int]:
+    """Return RGB alert background color according to threshold rules:
+    >= 90% (0.90): Green
+    >= 80% and < 90% (0.80 - 0.8999): Yellow
+    < 80%: Red / Pink
+    """
+    if ratio >= 0.90:
+        return _CLR_GREEN_ALERT
+    if ratio >= 0.80:
+        return _CLR_YELLOW_ALERT
+    return _CLR_PINK_ALERT
 
 # Default path for the extracted MMC logo
 _LOGO_PATH = Path(__file__).parent.parent / "data" / "image1.png"
@@ -268,8 +281,7 @@ class IndividualVentasPDF(FPDF):
                 # Col C: Value
                 self.set_xy(start_x + w_a + w_b, ry)
                 if alc:
-                    # Pink highlight if below 90% (0.895), soft green if >= 90%
-                    bg_color = _CLR_GREEN_ALERT if alcance_ratio >= 0.895 else _CLR_PINK_ALERT
+                    bg_color = _get_alcance_alert_color(alcance_ratio)
                     self.set_fill_color(*bg_color)
                     self.cell(w_c, h_row, _sanitize(val), border=1, fill=True, align="R")
                 else:
@@ -335,7 +347,7 @@ class IndividualVentasPDF(FPDF):
         self.cell(w_b, h_row, _sanitize("% SIN VENCER"), border=1, fill=True, align="L")
 
         self.set_xy(start_x + w_a + w_b, curr_y)
-        pct_color = _CLR_GREEN_ALERT if record.pct_sin_vencer >= 0.895 else _CLR_PINK_ALERT
+        pct_color = _get_alcance_alert_color(record.pct_sin_vencer)
         self.set_fill_color(*pct_color)
         self.cell(w_c, h_row, _fmt_pct(record.pct_sin_vencer), border=1, fill=True, align="R")
 
