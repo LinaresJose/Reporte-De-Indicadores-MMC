@@ -260,8 +260,11 @@ def calculate_general(
     pres_lookup = {k.upper().strip(): v for k, v in presupuestos.items()}
     cob_override_lookup = {k.upper().strip(): v for k, v in cobranza_override.items()} if cobranza_override else {}
 
+    processed_keys: set[str] = set()
+
     for name, zona_info in zonas.items():
         key = name.upper().strip()
+        processed_keys.add(key)
         cob_entry = cob_override_lookup.get(key) or cxc_lookup.get(key)
 
         try:
@@ -278,6 +281,56 @@ def calculate_general(
             records.append(record)
         except Exception as exc:
             raise EngineError(f"Failed to build record for vendor '{name}': {exc}") from exc
+
+    # Automatically incorporate any new vendor present in presupuestos that is not yet in zonas
+    for p_key, budget_rec in pres_lookup.items():
+        if p_key in processed_keys:
+            continue
+
+        # Check if this budget entry is an alias of an already processed vendor
+        alias_target = (
+            config.VENDOR_ALIAS.get(budget_rec.vendor_name)
+            or config.VENDOR_ALIAS.get(p_key)
+        )
+        if alias_target and alias_target.upper().strip() in processed_keys:
+            continue
+
+        vendor_name = budget_rec.vendor_name
+        region_str = (budget_rec.region or config.DEFAULT_REGION).upper().strip()
+        if region_str not in config.REGIONES:
+            region_str = config.DEFAULT_REGION
+
+        synthetic_zona = ZonaInfo(
+            vendor_name=vendor_name,
+            zona=getattr(budget_rec, "zona", "") or "",
+            region=region_str,
+            correo="",
+            codigo="",
+        )
+        cob_entry = cob_override_lookup.get(p_key) or cxc_lookup.get(p_key)
+
+        try:
+            record = build_vendor_record(
+                zona_info=synthetic_zona,
+                budget=budget_rec,
+                facturado=fac_lookup.get(p_key),
+                pedidos=ped_lookup.get(p_key),
+                devoluciones=dev_lookup.get(p_key),
+                cobranza=cob_entry,
+                por_facturar=pf_lookup.get(p_key),
+                backorder=bo_lookup.get(p_key),
+            )
+            records.append(record)
+            processed_keys.add(p_key)
+            logger.info(
+                "calculate_general: Nuevo vendedor en presupuestos incluido automáticamente: '%s' (%s)",
+                vendor_name,
+                region_str,
+            )
+        except Exception as exc:
+            raise EngineError(
+                f"Failed to build record for new budget vendor '{vendor_name}': {exc}"
+            ) from exc
 
     total_ventas_global = sum(r.ventas_netas for r in records)
     for rec in records:

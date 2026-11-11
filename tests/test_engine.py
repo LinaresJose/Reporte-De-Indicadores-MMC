@@ -10,6 +10,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from core.engine import (
     _safe_divide, _calc_alcance_puntos, _apply_vendor_aliases,
     build_vendor_record, calculate_rankings, filter_by_region, get_regional_totals,
+    calculate_general,
 )
 from core.models import (
     BackorderAgg, BudgetRecord, CobranzaAgg, DevolucionesAgg,
@@ -264,4 +265,50 @@ class TestApplyVendorAliases:
         res = _apply_vendor_aliases(raw_data)
         assert "DOUGLAS GONZALEZ(DABAJURO)" in res
         assert res["DOUGLAS GONZALEZ(DABAJURO)"] == 123
+
+    def test_alias_oriana_to_jhonny_silva(self):
+        raw_data = {
+            "ORIANA DIAZ (CCS - LA GUAIRA)": 999.0,
+        }
+        res = _apply_vendor_aliases(raw_data)
+        assert "JHONNY SILVA (CCS - LA GUAIRA)" in res
+        assert res["JHONNY SILVA (CCS - LA GUAIRA)"] == 999.0
+
+
+class TestCalculateGeneralNewVendors:
+    def test_new_vendor_in_budget_is_included(self):
+        zonas = {
+            "EXISTING VENDOR": _make_zona(nombre="EXISTING VENDOR", zona="01", region="CAPITAL")
+        }
+        presupuestos = {
+            "EXISTING VENDOR": _make_budget(ventas=10_000.0),
+            "NEW VENDOR FUTURE": BudgetRecord(
+                vendor_name="NEW VENDOR FUTURE",
+                presup_ventas=15_000.0,
+                presup_activacion=10.0,
+                presup_skus=50.0,
+                region="OCCIDENTE",
+                zona="02",
+            ),
+        }
+        records = calculate_general(
+            zonas=zonas,
+            facturado={},
+            pedidos={},
+            devoluciones={},
+            cobranza={},
+            por_facturar={},
+            backorder={},
+            presupuestos=presupuestos,
+        )
+        assert len(records) == 2
+        names = [r.vendor_name for r in records]
+        assert "EXISTING VENDOR" in names
+        assert "NEW VENDOR FUTURE" in names
+
+        new_rec = next(r for r in records if r.vendor_name == "NEW VENDOR FUTURE")
+        assert new_rec.region == "OCCIDENTE"
+        assert new_rec.presup_ventas == 15_000.0
+        assert new_rec.zona == "02"
+
 

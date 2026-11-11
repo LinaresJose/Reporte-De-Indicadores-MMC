@@ -55,6 +55,7 @@ from maintenance.budget_loader import (
     load_presupuestos,
     load_presupuestos_from_config,
     save_presupuestos_config,
+    sync_zonas_with_presupuestos,
 )
 from maintenance.cobranza_loader import (
     load_cobranza_cierre,
@@ -1144,10 +1145,14 @@ class LynxApp(tk.Tk):
             try:
                 presupuestos = load_presupuestos(path)
                 save_presupuestos_config(presupuestos, self._presupuestos_config)
-                self._post("done", (
+                added = sync_zonas_with_presupuestos(self._zonas_config, presupuestos)
+                msg = (
                     f"Presupuestos cargados: {len(presupuestos)} vendedores.\n"
                     f"Guardados en: {self._presupuestos_config}"
-                ))
+                )
+                if added:
+                    msg += f"\n\nNuevos vendedores registrados en zonas.xlsx ({len(added)}):\n• " + "\n• ".join(added)
+                self._post("done", msg)
             except LynxBaseError as exc:
                 self._post("error", str(exc))
             except Exception as exc:

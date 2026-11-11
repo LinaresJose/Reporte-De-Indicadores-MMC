@@ -56,6 +56,7 @@ class BudgetRecord:
     presup_skus: float
     presup_ventas: float
     region: str
+    zona: str = ""
 
 
 # ---------------------------------------------------------------------------

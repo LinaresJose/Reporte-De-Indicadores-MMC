@@ -151,6 +151,8 @@ VENDOR_ALIAS: dict[str, str] = {
     # Odoo name                              →  Canonical name in zonas.xlsx
     "DOUGLAS GONZALEZ(FALCON-DABJ ZULIA)": "DOUGLAS GONZALEZ(DABAJURO)",
     "MARIA NOGUERA(ZULIA-MCBO)":           "MARIA NOGUERA(MARACAIBO)",
+    "ORIANA DIAZ (CCS - LA GUAIRA)":       "JHONNY SILVA (CCS - LA GUAIRA)",
+    "AMILCAR LEON":                        "AMILCAR LEON(BOLIVAR)",
 }
 """Map from Odoo export vendor names → canonical vendor names in zonas.xlsx.
 

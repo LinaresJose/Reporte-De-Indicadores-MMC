@@ -558,6 +558,7 @@ def read_presupuestos(path: str | Path) -> Dict[str, BudgetRecord]:
                            "Meta Activación", "Presup. Activación", "Presup. Activacion"]
     _sku_aliases = ["SKU", "SKUs", "SKUS", "sku", "Meta SKUs", "Presup. SKUs", "Presup. SKU"]
     _region_aliases = ["Region", "REGION", "Región", "REGIÓN", "region"]
+    _zona_aliases = ["Zona", "ZONA", "zona", "zona_comercial"]
 
     def _pick(df: pd.DataFrame, aliases: list) -> str | None:
         for a in aliases:
@@ -570,6 +571,7 @@ def read_presupuestos(path: str | Path) -> Dict[str, BudgetRecord]:
     col_activacion = _pick(df, _activacion_aliases)
     col_sku = _pick(df, _sku_aliases)
     col_region = _pick(df, _region_aliases)
+    col_zona = _pick(df, _zona_aliases)
 
     missing = [n for n, c in [("VENTAS", col_ventas), ("ACTIVACION", col_activacion), ("SKU", col_sku)] if c is None]
     if missing:
@@ -590,12 +592,14 @@ def read_presupuestos(path: str | Path) -> Dict[str, BudgetRecord]:
         if not name or name.lower() == "nan":
             continue
         region_val = str(row[col_region]).strip().upper() if col_region and pd.notna(row.get(col_region)) else ""
+        zona_val = str(row[col_zona]).strip() if col_zona and pd.notna(row.get(col_zona)) and str(row[col_zona]).strip().lower() != "nan" else ""
         result[name.upper()] = BudgetRecord(
             vendor_name=name,
             presup_activacion=float(row[col_activacion]),
             presup_skus=float(row[col_sku]),
             presup_ventas=float(row[col_ventas]),
             region=region_val,
+            zona=zona_val,
         )
 
     logger.info("read_presupuestos: %d budget records loaded.", len(result))

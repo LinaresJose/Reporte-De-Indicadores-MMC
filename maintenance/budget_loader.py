@@ -197,11 +197,13 @@ def _parse_manager_sheet(df: pd.DataFrame) -> Dict[str, BudgetRecord]:
     col_skus: Optional[str] = _find_column(df, _COL_SKUS_ALIASES)
     # --- Region ---------------------------------------------------------
     col_region: Optional[str] = _find_column(df, _COL_REGION_ALIASES)
+    # --- Zona -----------------------------------------------------------
+    col_zona: Optional[str] = _find_column(df, ["Zona", "ZONA", "zona", "zona_comercial"])
 
     logger.info(
         "Manager budget sheet columns detected → ventas='%s', activacion='%s', "
-        "skus='%s', region='%s'",
-        col_ventas, col_activacion, col_skus, col_region,
+        "skus='%s', region='%s', zona='%s'",
+        col_ventas, col_activacion, col_skus, col_region, col_zona,
     )
 
     # Drop rows where Nombre is blank / NaN (includes the totals footer row)
@@ -225,12 +227,14 @@ def _parse_manager_sheet(df: pd.DataFrame) -> Dict[str, BudgetRecord]:
 
         key = name.upper().strip()
         region_val = str(row[col_region]).strip().upper() if col_region and pd.notna(row.get(col_region)) else ""
+        zona_val = str(row[col_zona]).strip() if col_zona and pd.notna(row.get(col_zona)) and str(row[col_zona]).strip().lower() != "nan" else ""
         result[key] = BudgetRecord(
             vendor_name=name,
             presup_ventas=float(row[col_ventas]) if col_ventas else 0.0,
             presup_activacion=float(row[col_activacion]) if col_activacion else 0.0,
             presup_skus=float(row[col_skus]) if col_skus else 0.0,
             region=region_val,
+            zona=zona_val,
         )
 
     logger.info("Manager budget sheet parsed: %d vendors.", len(result))
@@ -263,6 +267,7 @@ def _parse_canonical_sheet(df: pd.DataFrame) -> Dict[str, BudgetRecord]:
     col_activacion = _find_column(df, _COL_ACTIVACION_ALIASES)
     col_skus = _find_column(df, _COL_SKUS_ALIASES)
     col_region = _find_column(df, _COL_REGION_ALIASES)
+    col_zona = _find_column(df, ["Zona", "ZONA", "zona", "zona_comercial"])
 
     missing = [n for n, c in [("VENTAS", col_ventas), ("ACTIVACION", col_activacion), ("SKU", col_skus)] if c is None]
     if missing:
@@ -285,12 +290,14 @@ def _parse_canonical_sheet(df: pd.DataFrame) -> Dict[str, BudgetRecord]:
             continue
         key = name.upper()
         region_val = str(row[col_region]).strip().upper() if col_region and pd.notna(row.get(col_region)) else ""
+        zona_val = str(row[col_zona]).strip() if col_zona and pd.notna(row.get(col_zona)) and str(row[col_zona]).strip().lower() != "nan" else ""
         result[key] = BudgetRecord(
             vendor_name=name,
             presup_ventas=float(row[col_ventas]),
             presup_activacion=float(row[col_activacion]),
             presup_skus=float(row[col_skus]),
             region=region_val,
+            zona=zona_val,
         )
 
     return result
@@ -403,6 +410,7 @@ def save_presupuestos_config(
     rows = [
         {
             "Nombre": rec.vendor_name,
+            "Zona": getattr(rec, "zona", ""),
             "VENTAS": rec.presup_ventas,
             "ACTIVACIÓN": rec.presup_activacion,
             "SKU": rec.presup_skus,
@@ -467,3 +475,109 @@ def load_presupuestos_from_config(config_path: Path) -> Dict[str, BudgetRecord]:
             f"Error leyendo presupuestos de configuración '{config_path.name}': {exc}",
             maintenance_task="load_presupuestos_from_config",
         ) from exc
+
+
+def sync_zonas_with_presupuestos(
+    zonas_path: Path | str,
+    presupuestos: Dict[str, BudgetRecord],
+) -> List[str]:
+    """Inspect the loaded presupuestos against the current data/zonas.xlsx master table.
+
+    If any vendors defined in the monthly budget are not present in zonas.xlsx
+    (and not mapped as an existing alias), this function registers them in
+    zonas.xlsx to keep the sales representative master table fully synchronised.
+
+    Args:
+        zonas_path: Path to ``data/zonas.xlsx``.
+        presupuestos: Mapping of upper-cased vendor names to :class:`BudgetRecord`.
+
+    Returns:
+        List of newly registered vendor names.
+    """
+    import config
+
+    zonas_path = Path(zonas_path)
+    if not zonas_path.exists():
+        logger.warning("sync_zonas_with_presupuestos: Archivo '%s' no existe.", zonas_path)
+        return []
+
+    try:
+        df_zonas = pd.read_excel(zonas_path)
+    except Exception as exc:
+        logger.warning("No se pudo leer '%s' para sincronización: %s", zonas_path, exc)
+        return []
+
+    if config.COL_ZONA_NOMBRE not in df_zonas.columns:
+        logger.warning("Columna '%s' no encontrada en '%s'.", config.COL_ZONA_NOMBRE, zonas_path)
+        return []
+
+    existing_names: set[str] = {
+        str(n).upper().strip() for n in df_zonas[config.COL_ZONA_NOMBRE].dropna()
+    }
+    # Also treat aliases as covered if their canonical target is present
+    for alias_src, canonical in config.VENDOR_ALIAS.items():
+        if canonical.upper().strip() in existing_names:
+            existing_names.add(alias_src.upper().strip())
+
+    max_code_num = 0
+    if config.COL_ZONA_CODIGO in df_zonas.columns:
+        for c in df_zonas[config.COL_ZONA_CODIGO].dropna():
+            m = re.search(r"(\d+)", str(c))
+            if m:
+                max_code_num = max(max_code_num, int(m.group(1)))
+
+    new_rows: list[dict] = []
+    added_names: list[str] = []
+
+    for key, budget_rec in presupuestos.items():
+        norm_key = key.upper().strip()
+        canonical_target = (
+            config.VENDOR_ALIAS.get(budget_rec.vendor_name)
+            or config.VENDOR_ALIAS.get(norm_key)
+        )
+        if norm_key in existing_names or (
+            canonical_target and canonical_target.upper().strip() in existing_names
+        ):
+            continue
+
+        # Found a new vendor!
+        max_code_num += 1
+        new_code = f"VMMC-{max_code_num:02d}"
+        v_name = budget_rec.vendor_name
+        v_zona = getattr(budget_rec, "zona", "") or ""
+        v_region = (budget_rec.region or config.DEFAULT_REGION).upper().strip()
+        if v_region not in config.REGIONES:
+            v_region = config.DEFAULT_REGION
+
+        new_rows.append(
+            {
+                config.COL_ZONA_NOMBRE: v_name,
+                config.COL_ZONA_ZONA: v_zona,
+                config.COL_ZONA_CORREO: "",
+                config.COL_ZONA_CODIGO: new_code,
+                config.COL_ZONA_REGION: v_region,
+            }
+        )
+        existing_names.add(norm_key)
+        added_names.append(v_name)
+
+    if new_rows:
+        try:
+            df_new = pd.DataFrame(new_rows)
+            df_updated = pd.concat([df_zonas, df_new], ignore_index=True)
+            df_updated.to_excel(zonas_path, index=False, engine="openpyxl")
+            logger.info(
+                "sync_zonas_with_presupuestos: %d nuevos vendedores agregados a %s: %s",
+                len(new_rows),
+                zonas_path,
+                added_names,
+            )
+        except Exception as exc:
+            logger.warning(
+                "No se pudo escribir en '%s' al sincronizar nuevos vendedores: %s",
+                zonas_path,
+                exc,
+            )
+
+    return added_names
+
