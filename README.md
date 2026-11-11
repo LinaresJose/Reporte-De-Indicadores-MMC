@@ -155,15 +155,18 @@ Seleccione los 6 archivos exportados desde Odoo (ver [sección abajo](#archivos-
 2. Seleccionar mes en el desplegable y año en el spinner.
 3. Clic **"Aplicar mes"**.
 
-### C. Cobranza cierre de mes (INDICADOR_COBRANZA)
+### C. Cobranza cierre de mes (INDICADOR_COBRANZA) vs. Mes en curso
 
-> Al finalizar el mes el gerente envía `INDICADOR_COBRANZA_MES_AÑO.xlsx`.
-> Este archivo actualiza la hoja **"RESUMEN"** de cobranza.
+> **Mes en curso (Automático desde Odoo):** Mientras transcurre el mes, el sistema calcula automáticamente el `% Sin Vencer` a partir del archivo de Odoo `cuentas_por_cobrar_cierre.xlsx` usando la política de crédito comercial (32 días estándar, 45 días clientes VIP). No requiere intervención manual y la columna nunca queda vacía.
+>
+> **Cierre de mes (Definitivo):** Al finalizar el mes, el gerente entrega el archivo oficial `INDICADOR_COBRANZA_MES_AÑO.xlsx`.
+> Este archivo actualiza la cobranza con los datos auditados de la hoja **"RESUMEN"**.
 
-1. Pestaña **Mantenimiento** → sección **"Cobranza Cierre"**.
+1. Pestaña **Mantenimiento** → sección **"Cobranza Cierre (fin de mes)"**.
 2. Seleccionar el archivo `INDICADOR_COBRANZA_*.xlsx`.
 3. Clic **"Cargar Cobranza Cierre"**.
-4. Los datos de `% Sin Vencer` del próximo reporte usarán estos valores.
+4. El sistema guarda automáticamente una copia persistente en `data/cobranza_cierre.xlsx` y activa el modo de cierre definitivo.
+5. Si desea volver al cálculo dinámico desde Odoo para el nuevo mes, use el botón **"Modo Automático (Odoo)"**.
 
 ---
 

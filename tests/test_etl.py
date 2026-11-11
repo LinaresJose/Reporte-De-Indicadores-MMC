@@ -116,29 +116,98 @@ class TestReadFacturado:
 # read_por_cobrar (CxC date classification)
 # ===========================================================================
 
-@pytest.mark.skipif(not _has_files, reason="Source files not available")
-class TestReadPorCobrar:
-    """Integration tests for read_por_cobrar."""
+class TestReadPorCobrarSynthetic:
+    """Unit tests for read_por_cobrar aging and credit policies using synthetic workbooks."""
 
-    def test_returns_dataframe(self):
-        df = read_por_cobrar(str(_CXC_PATH))
-        assert isinstance(df, pd.DataFrame)
+    def test_credit_days_standard_and_vip(self, tmp_path):
+        import config
+        from datetime import date, timedelta
+        from core.models import CobranzaAgg
 
-    def test_has_vencido_column(self):
-        df = read_por_cobrar(str(_CXC_PATH))
-        assert "vencido" in df.columns, "Expected a 'vencido' boolean/int column"
+        ref_date = date(2026, 11, 10)
+        # 10 days ago (<= 32) -> Sin Vencer
+        # 35 days ago (> 32, <= 45) -> Standard is Vencido, VIP is Sin Vencer
+        # 50 days ago (> 45) -> Vencido for both
+        test_data = pd.DataFrame([
+            {
+                config.COL_COB_COMERCIAL: "VENDEDOR 1",
+                config.COL_COB_CLIENTE: "CLIENTE NORMAL",
+                config.COL_COB_FECHA_ENTREGA: ref_date - timedelta(days=10),
+                config.COL_COB_IMPORTE_ADEUDADO: 1000.0,
+            },
+            {
+                config.COL_COB_COMERCIAL: "VENDEDOR 1",
+                config.COL_COB_CLIENTE: "CLIENTE NORMAL",
+                config.COL_COB_FECHA_ENTREGA: ref_date - timedelta(days=35),
+                config.COL_COB_IMPORTE_ADEUDADO: 500.0,
+            },
+            {
+                config.COL_COB_COMERCIAL: "VENDEDOR 2",
+                config.COL_COB_CLIENTE: "CLIENTE VIP ESPECIAL",
+                config.COL_COB_FECHA_ENTREGA: ref_date - timedelta(days=35),
+                config.COL_COB_IMPORTE_ADEUDADO: 2000.0,
+            },
+            {
+                config.COL_COB_COMERCIAL: "VENDEDOR 2",
+                config.COL_COB_CLIENTE: "CLIENTE VIP ESPECIAL",
+                config.COL_COB_FECHA_ENTREGA: ref_date - timedelta(days=50),
+                config.COL_COB_IMPORTE_ADEUDADO: 1000.0,
+            },
+        ])
 
-    def test_has_importe_column(self):
-        df = read_por_cobrar(str(_CXC_PATH))
-        # Could be 'importe' or 'importe_adeudado'
-        importe_cols = [c for c in df.columns if "importe" in c.lower()]
-        assert len(importe_cols) > 0, f"No importe column found. Columns: {df.columns.tolist()}"
+        excel_file = tmp_path / "cxc_test.xlsx"
+        test_data.to_excel(excel_file, index=False)
 
-    def test_vencido_is_boolean_or_integer(self):
-        df = read_por_cobrar(str(_CXC_PATH))
-        assert df["vencido"].dtype in (bool, int, "bool", "int64", "int32"), (
-            f"Unexpected dtype for 'vencido': {df['vencido'].dtype}"
+        res = read_por_cobrar(
+            excel_file,
+            as_of_date=ref_date,
+            vip_clients={"CLIENTE VIP ESPECIAL"},
         )
+
+        assert "VENDEDOR 1" in res
+        assert "VENDEDOR 2" in res
+
+        # Vendedor 1: 1000 sin vencer, 500 vencido
+        v1 = res["VENDEDOR 1"]
+        assert isinstance(v1, CobranzaAgg)
+        assert v1.total_sin_vencer == pytest.approx(1000.0)
+        assert v1.total_vencido == pytest.approx(500.0)
+        assert v1.pct_sin_vencer == pytest.approx(1000.0 / 1500.0)
+
+        # Vendedor 2: 2000 sin vencer (VIP 35 días <= 45), 1000 vencido
+        v2 = res["VENDEDOR 2"]
+        assert v2.total_sin_vencer == pytest.approx(2000.0)
+        assert v2.total_vencido == pytest.approx(1000.0)
+        assert v2.pct_sin_vencer == pytest.approx(2000.0 / 3000.0)
+
+    def test_fallback_to_fecha_vencimiento(self, tmp_path):
+        import config
+        from datetime import date, timedelta
+
+        ref_date = date(2026, 11, 10)
+        test_data = pd.DataFrame([
+            {
+                config.COL_COB_COMERCIAL: "VENDEDOR 3",
+                config.COL_COB_FECHA_ENTREGA: None,
+                config.COL_COB_FECHA_VENCIMIENTO: ref_date + timedelta(days=5),
+                config.COL_COB_IMPORTE_ADEUDADO: 300.0,
+            },
+            {
+                config.COL_COB_COMERCIAL: "VENDEDOR 3",
+                config.COL_COB_FECHA_ENTREGA: None,
+                config.COL_COB_FECHA_VENCIMIENTO: ref_date - timedelta(days=2),
+                config.COL_COB_IMPORTE_ADEUDADO: 700.0,
+            },
+        ])
+
+        excel_file = tmp_path / "cxc_venc.xlsx"
+        test_data.to_excel(excel_file, index=False)
+
+        res = read_por_cobrar(excel_file, as_of_date=ref_date)
+        v3 = res["VENDEDOR 3"]
+        assert v3.total_sin_vencer == pytest.approx(300.0)
+        assert v3.total_vencido == pytest.approx(700.0)
+
 
 
 # ===========================================================================

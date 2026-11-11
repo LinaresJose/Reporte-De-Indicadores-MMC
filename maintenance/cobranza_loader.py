@@ -19,8 +19,9 @@ Typical usage::
 from __future__ import annotations
 
 import logging
+import shutil
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Set
 
 import pandas as pd
 
@@ -138,7 +139,7 @@ def load_cobranza_cierre(path: str | Path) -> Dict[str, CobranzaAgg]:
         )
 
     try:
-        df = xl.parse(_SHEET_RESUMEN)
+        df = pd.read_excel(xl, sheet_name=_SHEET_RESUMEN)
     except Exception as exc:
         raise MaintenanceError(
             f"No se pudo leer la hoja '{_SHEET_RESUMEN}' de '{path.name}': {exc}",
@@ -211,3 +212,96 @@ def load_cobranza_cierre(path: str | Path) -> Dict[str, CobranzaAgg]:
         "Cobranza cierre loaded: %d vendors from '%s'", len(result), path.name
     )
     return result
+
+
+def save_cobranza_cierre(
+    source_path: str | Path,
+    dest_path: Optional[str | Path] = None,
+) -> Path:
+    """Save or copy the manager's cobranza closing file to the persistent data folder.
+
+    Args:
+        source_path: Path to the manager's ``INDICADOR_COBRANZA_*.xlsx`` file.
+        dest_path: Optional destination path. If not provided, defaults to
+            ``data/cobranza_cierre.xlsx``.
+
+    Returns:
+        The destination :class:`Path` where the file was saved.
+
+    Raises:
+        MaintenanceError: If the source file cannot be read or written.
+    """
+    src = Path(source_path)
+    if not src.exists():
+        raise MaintenanceError(
+            f"El archivo origen de cobranza no existe: {src}",
+            maintenance_task="save_cobranza_cierre",
+        )
+
+    if dest_path is None:
+        dest = Path(__file__).parent.parent / "data" / "cobranza_cierre.xlsx"
+    else:
+        dest = Path(dest_path)
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        shutil.copy2(src, dest)
+        logger.info("Cobranza cierre persistent copy created at '%s'", dest)
+        return dest
+    except Exception as exc:
+        raise MaintenanceError(
+            f"No se pudo guardar la cobranza de cierre en '{dest}': {exc}",
+            maintenance_task="save_cobranza_cierre",
+        ) from exc
+
+
+def load_vip_clients(path: Optional[str | Path] = None) -> Set[str]:
+    """Load the list of VIP clients who have extended credit terms (45 days).
+
+    Looks for a sheet named ``'VIP'`` in ``data/cobranza_cierre.xlsx`` (or the
+    supplied *path*).
+
+    Args:
+        path: Path to the file containing a 'VIP' sheet. Defaults to
+            ``data/cobranza_cierre.xlsx``.
+
+    Returns:
+        Set of uppercase, stripped client names that qualify as VIP.
+    """
+    if path is None:
+        target = Path(__file__).parent.parent / "data" / "cobranza_cierre.xlsx"
+    else:
+        target = Path(path)
+
+    if not target.exists():
+        return set()
+
+    try:
+        xl = pd.ExcelFile(target, engine="openpyxl")
+        if "VIP" not in xl.sheet_names:
+            return set()
+        df = pd.read_excel(xl, sheet_name="VIP")
+        # Try finding client column
+        client_col = None
+        for col in ["CLIENTE", "Cliente", "Nombre", "Socio"]:
+            if col in df.columns:
+                client_col = col
+                break
+        if client_col is None and len(df.columns) > 1:
+            client_col = df.columns[1]  # Typically second column is CLIENTE
+
+        if client_col is None:
+            return set()
+
+        vip_set = {
+            str(c).strip().upper()
+            for c in df[client_col].dropna()
+            if str(c).strip() and str(c).strip().upper() != "CLIENTE"
+        }
+        logger.debug("Loaded %d VIP clients from '%s'", len(vip_set), target.name)
+        return vip_set
+    except Exception as exc:
+        logger.warning("Could not load VIP clients from '%s': %s", target, exc)
+        return set()
+

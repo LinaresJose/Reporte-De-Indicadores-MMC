@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional, Set
 
 import pandas as pd
 
@@ -252,14 +252,28 @@ def read_devoluciones(path: str | Path) -> Dict[str, DevolucionesAgg]:
     return result
 
 
-def read_por_cobrar(path: str | Path) -> Dict[str, CobranzaAgg]:
+def read_por_cobrar(
+    path: str | Path,
+    as_of_date: Optional[date] = None,
+    vip_clients: Optional[Set[str]] = None,
+) -> Dict[str, CobranzaAgg]:
     """Read and aggregate the accounts-receivable file (``cuentas_por_cobrar_cierre.xlsx``).
 
-    Classifies each invoice as *sin vencer* (not yet due) or *vencido* (past due)
-    by comparing ``Fecha de entrega`` against today's date, then groups by vendor.
+    Classifies each invoice line as *sin vencer* (current) or *vencido* (past due)
+    using the company credit policy:
+    - Standard accounts: *sin vencer* if elapsed days since ``Fecha de entrega`` <=
+      ``config.CREDIT_DAYS_STANDARD`` (32 days).
+    - VIP accounts: *sin vencer* if elapsed days since ``Fecha de entrega`` <=
+      ``config.CREDIT_DAYS_VIP`` (45 days).
+    - Fallback: if ``Fecha de entrega`` is missing, compares ``Fecha de vencimiento``
+      against the reference cut-off date.
 
     Args:
         path: Path to the accounts-receivable export from Odoo.
+        as_of_date: Reference date for aging calculation. If omitted, uses the
+            daily cut-off reference date (today if hour >= 16:30, else yesterday).
+        vip_clients: Optional set of upper-cased VIP customer names. If None,
+            automatically attempts to load from the stored closing workbook.
 
     Returns:
         Dictionary keyed by stripped vendor name → :class:`CobranzaAgg`.
@@ -278,26 +292,83 @@ def read_por_cobrar(path: str | Path) -> Dict[str, CobranzaAgg]:
     _validate_columns(df, required, Path(path).name)
 
     df[config.COL_COB_COMERCIAL] = df[config.COL_COB_COMERCIAL].astype(str).str.strip()
+    df = df[
+        df[config.COL_COB_COMERCIAL].notna()
+        & (df[config.COL_COB_COMERCIAL] != "")
+        & (df[config.COL_COB_COMERCIAL].str.lower() != "nan")
+    ]
     df[config.COL_COB_IMPORTE_ADEUDADO] = pd.to_numeric(
         df[config.COL_COB_IMPORTE_ADEUDADO], errors="coerce"
     ).fillna(0.0)
-    df[config.COL_COB_FECHA_ENTREGA] = pd.to_datetime(
-        df[config.COL_COB_FECHA_ENTREGA], errors="coerce"
-    )
 
-    today = date.today()
+    # Determine reference calculation date
+    if as_of_date is None:
+        now = datetime.now()
+        cutoff = now.replace(
+            hour=config.CUTOFF_HOUR,
+            minute=config.CUTOFF_MINUTE,
+            second=0,
+            microsecond=0,
+        )
+        as_of_date = now.date() if now >= cutoff else now.date() - timedelta(days=1)
+
+    ref_dt = pd.to_datetime(as_of_date)
+
+    # Load VIP client set if not explicitly passed
+    if vip_clients is None:
+        try:
+            from maintenance.cobranza_loader import load_vip_clients
+
+            vip_clients = load_vip_clients()
+        except Exception as exc:
+            logger.debug("Could not auto-load VIP clients: %s", exc)
+            vip_clients = set()
+
+    has_entrega = config.COL_COB_FECHA_ENTREGA in df.columns
+    has_vencimiento = config.COL_COB_FECHA_VENCIMIENTO in df.columns
+    has_cliente = config.COL_COB_CLIENTE in df.columns
+
+    if has_entrega:
+        df[config.COL_COB_FECHA_ENTREGA] = pd.to_datetime(
+            df[config.COL_COB_FECHA_ENTREGA], errors="coerce"
+        )
+    if has_vencimiento:
+        df[config.COL_COB_FECHA_VENCIMIENTO] = pd.to_datetime(
+            df[config.COL_COB_FECHA_VENCIMIENTO], errors="coerce"
+        )
+
+    def _is_sin_vencer(r: pd.Series) -> bool:
+        # Determine applicable credit limit
+        client_name = (
+            str(r[config.COL_COB_CLIENTE]).strip().upper()
+            if has_cliente and pd.notna(r.get(config.COL_COB_CLIENTE))
+            else ""
+        )
+        limit_days = (
+            config.CREDIT_DAYS_VIP
+            if (vip_clients and client_name in vip_clients)
+            else config.CREDIT_DAYS_STANDARD
+        )
+
+        # Primary rule: days elapsed since Fecha de entrega
+        if has_entrega and pd.notna(r.get(config.COL_COB_FECHA_ENTREGA)):
+            f_entrega = r[config.COL_COB_FECHA_ENTREGA]
+            dias = (ref_dt - f_entrega).days
+            return dias <= limit_days
+
+        # Secondary fallback: Fecha de vencimiento
+        if has_vencimiento and pd.notna(r.get(config.COL_COB_FECHA_VENCIMIENTO)):
+            return r[config.COL_COB_FECHA_VENCIMIENTO] >= ref_dt
+
+        # Default fallback
+        return True
+
     df["_sin_vencer"] = df.apply(
-        lambda r: float(r[config.COL_COB_IMPORTE_ADEUDADO])
-        if pd.notna(r[config.COL_COB_FECHA_ENTREGA])
-        and r[config.COL_COB_FECHA_ENTREGA].date() >= today
-        else 0.0,
+        lambda r: float(r[config.COL_COB_IMPORTE_ADEUDADO]) if _is_sin_vencer(r) else 0.0,
         axis=1,
     )
     df["_vencido"] = df.apply(
-        lambda r: float(r[config.COL_COB_IMPORTE_ADEUDADO])
-        if pd.isna(r[config.COL_COB_FECHA_ENTREGA])
-        or r[config.COL_COB_FECHA_ENTREGA].date() < today
-        else 0.0,
+        lambda r: float(r[config.COL_COB_IMPORTE_ADEUDADO]) if not _is_sin_vencer(r) else 0.0,
         axis=1,
     )
 
@@ -316,7 +387,7 @@ def read_por_cobrar(path: str | Path) -> Dict[str, CobranzaAgg]:
                 total_vencido=float(row["total_vencido"]),
             )
 
-    logger.info("read_por_cobrar: %d vendors", len(result))
+    logger.info("read_por_cobrar: %d vendors (ref_date=%s)", len(result), as_of_date)
     return result
 
 

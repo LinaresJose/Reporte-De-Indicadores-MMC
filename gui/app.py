@@ -56,7 +56,10 @@ from maintenance.budget_loader import (
     load_presupuestos_from_config,
     save_presupuestos_config,
 )
-from maintenance.cobranza_loader import load_cobranza_cierre
+from maintenance.cobranza_loader import (
+    load_cobranza_cierre,
+    save_cobranza_cierre,
+)
 from reports.excel_writer import generate_excel_report
 from reports.manifest_writer import write_regional_manifest, write_vendor_manifest
 from reports.pdf_writer import generate_pdf_reports
@@ -345,12 +348,30 @@ class LynxApp(tk.Tk):
         )
         self._cob_picker.pack(fill="x", pady=2)
 
+        cob_btn_row = ttk.Frame(cob_frame)
+        cob_btn_row.pack(fill="x", pady=(6, 0))
+
         ttk.Button(
-            cob_frame,
+            cob_btn_row,
             text="Cargar Cobranza Cierre",
             command=self._load_cobranza_cierre,
-            width=25,
-        ).pack(anchor="w", pady=(6, 0))
+            width=24,
+        ).pack(side="left")
+
+        ttk.Button(
+            cob_btn_row,
+            text="Modo Automático (Odoo)",
+            command=self._clear_cobranza_cierre,
+            width=24,
+        ).pack(side="left", padx=(8, 0))
+
+        self._cob_status_lbl = ttk.Label(
+            cob_frame,
+            text="Modo actual: Automático desde Odoo (mes en curso)",
+            foreground="#006400",
+            font=("Segoe UI", 9, "bold"),
+        )
+        self._cob_status_lbl.pack(anchor="w", pady=(6, 0))
 
     def _build_email_tab(self) -> None:
         """Construct the 'Envío de Correos' tab widgets."""
@@ -778,12 +799,17 @@ class LynxApp(tk.Tk):
         if _default_cob.exists() and not self._cobranza_cierre_path:
             self._cobranza_cierre_path = str(_default_cob)
             self._log(
-                f"Cobranza cierre encontrada: {_default_cob.name} — se aplicará al reporte.",
+                f"Cobranza cierre encontrada: {_default_cob.name} — se aplicará como cierre oficial.",
                 "INFO",
             )
             # Pre-fill the picker entry if it exists
             try:
                 self._cob_picker.set(str(_default_cob))
+                if hasattr(self, "_cob_status_lbl"):
+                    self._cob_status_lbl.config(
+                        text=f"Modo: Cierre definitivo activo ({_default_cob.name})",
+                        foreground="#1F3864",
+                    )
             except Exception:
                 pass
 
@@ -814,6 +840,11 @@ class LynxApp(tk.Tk):
                     self._on_worker_done(msg.payload)
                 elif msg.kind == "email_done":
                     self._on_email_done(msg.payload)
+                elif msg.kind == "cob_status":
+                    if hasattr(self, "_cob_status_lbl"):
+                        mode, text = msg.payload
+                        fg = "#1F3864" if mode == "cierre" else "#006400"
+                        self._cob_status_lbl.config(text=text, foreground=fg)
                 elif msg.kind == "error":
                     self._on_worker_error(msg.payload)
         except queue.Empty:
@@ -965,8 +996,16 @@ class LynxApp(tk.Tk):
         # Load cobranza cierre if available
         cobranza_override = None
         if self._cobranza_cierre_path and os.path.isfile(self._cobranza_cierre_path):
-            self._post("log", ("Aplicando Cobranza Cierre…", "INFO"))
+            self._post(
+                "log",
+                (f"Aplicando Cobranza Cierre definitivo: {Path(self._cobranza_cierre_path).name}", "INFO"),
+            )
             cobranza_override = load_cobranza_cierre(self._cobranza_cierre_path)
+        else:
+            self._post(
+                "log",
+                ("Cobranza: Calculando automáticamente desde archivo Odoo (mes en curso)…", "INFO"),
+            )
 
         self._post("log", ("Calculando indicadores por vendedor…", "INFO"))
         records = calculate_general(
@@ -1129,17 +1168,41 @@ class LynxApp(tk.Tk):
         def _worker():
             try:
                 cobranza = load_cobranza_cierre(path)
-                self._cobranza_cierre_path = path
+                saved_dest = save_cobranza_cierre(path)
+                self._cobranza_cierre_path = str(saved_dest)
                 self._post("done", (
-                    f"Cobranza cierre cargada: {len(cobranza)} vendedores.\n"
-                    f"Se aplicará al próximo reporte generado."
+                    f"Cobranza cierre cargada y guardada: {len(cobranza)} vendedores.\n"
+                    f"Guardado en: {saved_dest.name}\n"
+                    f"Se aplicará como cierre definitivo al próximo reporte generado."
                 ))
+                self._post(
+                    "cob_status",
+                    ("cierre", f"Modo: Cierre definitivo activo ({Path(path).name})"),
+                )
             except LynxBaseError as exc:
                 self._post("error", str(exc))
             except Exception as exc:
                 self._post("error", f"Error al cargar cobranza cierre: {exc}")
 
         self._start_worker(_worker)
+
+    def _clear_cobranza_cierre(self) -> None:
+        """Clear active closing cobranza override, returning to dynamic Odoo mode."""
+        self._cobranza_cierre_path = None
+        self._cob_picker.set("")
+        if hasattr(self, "_cob_status_lbl"):
+            self._cob_status_lbl.config(
+                text="Modo actual: Automático desde Odoo (mes en curso)",
+                foreground="#006400",
+            )
+        self._log(
+            "Cobranza Cierre desactivada. Se calculará automáticamente desde Odoo.",
+            "INFO",
+        )
+        messagebox.showinfo(
+            "Modo Automático",
+            "Cobranza Cierre desactivada.\nLos próximos reportes calcularán % Sin Vencer desde los archivos de Odoo.",
+        )
 
     def _on_email_done(self, stats: Dict[str, int]) -> None:
         """Callback ejecutado en el hilo principal cuando termina el envío masivo."""

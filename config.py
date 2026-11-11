@@ -39,16 +39,29 @@ COL_PED_BACKORDER_VALUE: str = "Backorder Value"
 """Pending / backorder monetary value column."""
 
 # ---------------------------------------------------------------------------
-# Cobranza (accounts-receivable) column names
+# Cobranza (accounts-receivable) column names and credit limits
 # ---------------------------------------------------------------------------
 COL_COB_COMERCIAL: str = "Comercial/Nombre"
 """Vendor name column in the accounts-receivable export."""
 
 COL_COB_FECHA_ENTREGA: str = "Fecha de entrega"
-"""Due date column used to classify amounts as current vs. overdue."""
+"""Delivery date column used to calculate days elapsed since delivery."""
+
+COL_COB_FECHA_VENCIMIENTO: str = "Fecha de vencimiento"
+"""Due date column used as secondary/fallback classification."""
+
+COL_COB_CLIENTE: str = "Nombre del socio a mostrar en la factura."
+"""Customer name column used to determine VIP status."""
 
 COL_COB_IMPORTE_ADEUDADO: str = "Importe adeudado con signo"
 """Outstanding balance column in the accounts-receivable export."""
+
+CREDIT_DAYS_STANDARD: int = 32
+"""Maximum days since delivery for standard accounts to be considered 'Sin Vencer' (30 days credit + 2 grace days)."""
+
+CREDIT_DAYS_VIP: int = 45
+"""Maximum days since delivery for VIP accounts to be considered 'Sin Vencer'."""
+
 
 # ---------------------------------------------------------------------------
 # Zonas column names
