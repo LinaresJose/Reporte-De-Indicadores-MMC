@@ -332,6 +332,17 @@ def calculate_general(
                 f"Failed to build record for new budget vendor '{vendor_name}': {exc}"
             ) from exc
 
+    # Check if there are active sellers in Odoo not registered in zonas/presupuestos
+    unrecognized = [
+        k for k in fac_lookup.keys()
+        if k not in processed_keys and k not in {"DIRECTOR", "ADMIN", "OFICINA", "GERENCIA", "DEFAULT", "NAN", ""}
+    ]
+    if unrecognized:
+        logger.warning(
+            "calculate_general: Vendedores con ventas en Odoo NO registrados en zonas ni presupuestos: %s",
+            unrecognized,
+        )
+
     total_ventas_global = sum(r.ventas_netas for r in records)
     for rec in records:
         rec.participacion = _safe_divide(rec.ventas_netas, total_ventas_global)

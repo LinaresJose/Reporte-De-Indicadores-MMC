@@ -65,6 +65,8 @@ from reports.excel_writer import generate_excel_report
 from reports.manifest_writer import write_regional_manifest, write_vendor_manifest
 from reports.pdf_writer import generate_pdf_reports
 from services.email_sender import EmailSender, get_default_templates, map_vendors_to_pdfs_and_emails, get_coordinator_dests, build_coordinator_extra_attachments
+from services.worker_directory import export_workers_directory_excel
+from gui.worker_dialog import WorkerEmailDialog
 
 logger = logging.getLogger(__name__)
 
@@ -375,6 +377,36 @@ class LynxApp(tk.Tk):
         )
         self._cob_status_lbl.pack(anchor="w", pady=(6, 0))
 
+        # --- Directorio de Trabajadores y Correos ---
+        worker_maint_frame = SectionFrame(self._tab_maint, "Directorio de Trabajadores, Correos y Metas")
+        worker_maint_frame.pack(fill="x", pady=(0, 10))
+
+        ttk.Label(
+            worker_maint_frame,
+            text=(
+                "Consulte la lista completa de comerciales y coordinadores, descargue un archivo Excel\n"
+                "con sus correos y metas del mes, o modifique los correos de destino cuando haya cambios de personal."
+            ),
+            foreground="#444444",
+        ).pack(anchor="w", pady=(0, 6))
+
+        row_w_btns = ttk.Frame(worker_maint_frame)
+        row_w_btns.pack(fill="x", pady=(4, 2))
+
+        ttk.Button(
+            row_w_btns,
+            text="📥 Descargar Directorio y Metas (Excel)",
+            command=self._download_workers_directory,
+            width=36,
+        ).pack(side="left", padx=(0, 10))
+
+        ttk.Button(
+            row_w_btns,
+            text="✏ Modificar Correos de Trabajadores",
+            command=self._open_worker_email_dialog,
+            width=34,
+        ).pack(side="left")
+
     def _build_email_tab(self) -> None:
         """Construct the 'Envío de Correos' tab widgets."""
         # --- Configuración del Remitente ---
@@ -446,10 +478,28 @@ class LynxApp(tk.Tk):
 
         # Selector de carpeta de reportes / PDFs
         row_dir = ttk.Frame(send_frame)
-        row_dir.pack(fill="x", pady=(2, 6))
+        row_dir.pack(fill="x", pady=(2, 4))
         ttk.Label(row_dir, text="Carpeta de Reportes:", width=20, anchor="w").pack(side="left")
         ttk.Entry(row_dir, textvariable=self._output_var, state="readonly").pack(side="left", fill="x", expand=True, padx=5)
         ttk.Button(row_dir, text="Cambiar...", command=self._browse_output_dir, width=12).pack(side="left")
+
+        # Fila de gestión de directorio y modificación de correos
+        row_dir_tools = ttk.Frame(send_frame)
+        row_dir_tools.pack(fill="x", pady=(2, 6))
+
+        ttk.Button(
+            row_dir_tools,
+            text="📥 Descargar Directorio y Metas (Excel)",
+            command=self._download_workers_directory,
+            width=36,
+        ).pack(side="left", padx=(0, 10))
+
+        ttk.Button(
+            row_dir_tools,
+            text="✏ Modificar Correos de Trabajadores",
+            command=self._open_worker_email_dialog,
+            width=34,
+        ).pack(side="left")
 
         row_actions = ttk.Frame(send_frame)
         row_actions.pack(fill="x", pady=4)
@@ -768,6 +818,46 @@ class LynxApp(tk.Tk):
                 self._btn_run.config(state=state)
             except Exception:
                 pass
+
+    def _open_worker_email_dialog(self) -> None:
+        """Abre la ventana para consultar trabajadores, metas y modificar correos."""
+        WorkerEmailDialog(
+            parent=self,
+            zonas_path=self._zonas_config,
+            presupuestos_path=self._presupuestos_config,
+            mes_label=self._get_mes_label(),
+            on_log=self._log,
+        )
+
+    def _download_workers_directory(self) -> None:
+        """Genera y descarga un archivo en Excel con los trabajadores, correos y metas del mes."""
+        mes_label = self._get_mes_label()
+        initial_file = f"Directorio_Trabajadores_Metas_{mes_label.replace(' ', '_')}.xlsx"
+
+        dest = filedialog.asksaveasfilename(
+            parent=self,
+            title="Guardar Directorio de Trabajadores y Metas en Excel",
+            initialfile=initial_file,
+            defaultextension=".xlsx",
+            filetypes=[("Libro de Excel", "*.xlsx"), ("Todos los archivos", "*.*")],
+        )
+        if not dest:
+            return
+
+        try:
+            out_path = export_workers_directory_excel(
+                zonas_path=self._zonas_config,
+                presupuestos_path=self._presupuestos_config,
+                output_file=Path(dest),
+                mes_label=mes_label,
+            )
+            msg = f"Directorio de trabajadores y metas exportado con éxito a:\n{out_path}"
+            self._log(f"✔ {msg}", "SUCCESS")
+            messagebox.showinfo("Exportación Exitosa", msg, parent=self)
+        except Exception as exc:
+            err_msg = f"Error al exportar directorio de trabajadores:\n{exc}"
+            self._log(f"✖ {err_msg}", "ERROR")
+            messagebox.showerror("Error", err_msg, parent=self)
 
     def _browse_output_dir(self) -> None:
         """Open a folder-picker and update the output directory entry."""
