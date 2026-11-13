@@ -586,10 +586,14 @@ class LynxApp(tk.Tk):
 
         dests = map_vendors_to_pdfs_and_emails(manifest_path, zonas_path, pdf_dir)
         coord_dests = get_coordinator_dests(zonas_path, regional_dir, pdf_dir)
+        coord_emails = {c.get("email", "").lower() for c in coord_dests if c.get("email")}
 
-        listos = [d for d in dests if d["email"] and d["existe_pdf"] == "True"]
-        sin_correo = [d for d in dests if not d["email"]]
-        sin_pdf = [d for d in dests if d["existe_pdf"] != "True"]
+        # Excluir a los coordinadores de la lista individual de vendedores para no duplicar envío
+        dests_vendors = [d for d in dests if d.get("email", "").lower() not in coord_emails]
+
+        listos = [d for d in dests_vendors if d["email"] and d["existe_pdf"] == "True"]
+        sin_correo = [d for d in dests_vendors if not d["email"]]
+        sin_pdf = [d for d in dests_vendors if d["existe_pdf"] != "True"]
         coord_listos = [
             d for d in coord_dests
             if d["email"] and (d["existe_pdf"] == "True" or d.get("regional_excel"))
@@ -694,17 +698,22 @@ class LynxApp(tk.Tk):
 
             # --- Vendor destinations from manifest ---
             dests = map_vendors_to_pdfs_and_emails(manifest_path, zonas_path, pdf_dir)
-            listos = [d for d in dests if d["email"] and d["existe_pdf"] == "True"]
 
             # --- Coordinator destinations (not in manifest) ---
             coord_dests = get_coordinator_dests(zonas_path, regional_dir, pdf_dir)
+            coord_emails = {c.get("email", "").lower() for c in coord_dests if c.get("email")}
+
+            # Excluir a los coordinadores de la lista individual de vendedores para no duplicar envío
+            dests_vendors = [d for d in dests if d.get("email", "").lower() not in coord_emails]
+            listos = [d for d in dests_vendors if d["email"] and d["existe_pdf"] == "True"]
+
             coord_listos = [
                 d for d in coord_dests
                 if d["email"] and (d["existe_pdf"] == "True" or d.get("regional_excel"))
             ]
 
             # Combined list for the batch
-            todos = dests + coord_dests
+            todos = dests_vendors + coord_dests
             total_listos = len(listos) + len(coord_listos)
 
             if total_listos == 0:

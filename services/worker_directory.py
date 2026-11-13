@@ -23,7 +23,7 @@ import config
 
 logger = logging.getLogger(__name__)
 
-_COORD_KEYWORDS = ("COORD", "SUPERVISOR", "COORDINADOR")
+_COORD_KEYWORDS = ("COORD", "COOR", "SUPERVISOR", "COORDINADOR")
 _GERENCIA_KEYWORDS = ("GERENCIA", "GERENTE", "DIRECTOR", "ADMINISTRACION")
 
 _CLR_HEADER_BG = "1F3864"   # Azul corporativo MMC
@@ -35,8 +35,22 @@ _CLR_OK_FG     = "006100"   # Verde oscuro para estados válidos
 _CLR_OK_BG     = "C6EFCE"   # Verde claro fondo
 
 
-def _classify_worker_role(nombre: str) -> str:
-    """Clasifica el rol del trabajador en base a su nombre."""
+def _classify_worker_role(nombre: str, rol_col: str = "", codigo_col: str = "") -> str:
+    """Clasifica el rol del trabajador en base a su columna explícita, código o nombre."""
+    rol_clean = str(rol_col or "").strip().lower()
+    if "coord" in rol_clean or "superv" in rol_clean:
+        return "Coordinador / Supervisor"
+    if "geren" in rol_clean or "direct" in rol_clean:
+        return "Gerencia / Dirección"
+    if "vend" in rol_clean or "comercial" in rol_clean:
+        return "Comercial / Vendedor"
+
+    cod_up = str(codigo_col or "").strip().upper()
+    if cod_up.startswith("CMMC"):
+        return "Coordinador / Supervisor"
+    if cod_up.startswith("GMMC"):
+        return "Gerencia / Dirección"
+
     up = nombre.upper()
     if any(k in up for k in _GERENCIA_KEYWORDS):
         return "Gerencia / Dirección"
@@ -161,7 +175,8 @@ def get_workers_directory_data(
             if not zona and p_data and p_data.get("zona"):
                 zona = p_data["zona"]
 
-            rol = _classify_worker_role(nombre)
+            rol_val = str(row.get("Rol", "") or "").strip()
+            rol = _classify_worker_role(nombre, rol_col=rol_val, codigo_col=codigo)
             tiene_correo = bool(correo and "@" in correo)
 
             records.append({
@@ -413,6 +428,83 @@ def export_workers_directory_excel(
     wb.save(output_file)
     logger.info("Directorio de trabajadores exportado exitosamente a: %s", output_file)
     return output_file
+
+
+def update_worker_role(
+    zonas_path: Path,
+    worker_name: str,
+    new_role: str,
+    new_region: Optional[str] = None,
+) -> Tuple[bool, str]:
+    """Actualiza el rol (Coordinador o Vendedor) y opcionalmente la región en data/zonas.xlsx.
+
+    Args:
+        zonas_path: Ruta a data/zonas.xlsx
+        worker_name: Nombre del trabajador
+        new_role: 'Coordinador' o 'Vendedor'
+        new_region: Región geográfica asignada (e.g. 'CAPITAL', 'OCCIDENTE', etc.)
+
+    Returns:
+        Tupla (éxito: bool, mensaje: str).
+    """
+    zonas_path = Path(zonas_path)
+    if not zonas_path.exists():
+        return False, f"El archivo {zonas_path} no existe."
+
+    role_clean = "Coordinador" if "coord" in new_role.lower() else "Vendedor"
+
+    try:
+        df = pd.read_excel(zonas_path)
+    except Exception as exc:
+        return False, f"No se pudo abrir {zonas_path.name}: {exc}"
+
+    if config.COL_ZONA_NOMBRE not in df.columns:
+        return False, f"Columna '{config.COL_ZONA_NOMBRE}' no encontrada."
+
+    if "Rol" not in df.columns:
+        df["Rol"] = "Vendedor"
+
+    target_upper = worker_name.strip().upper()
+    match_idx = None
+
+    for idx, val in df[config.COL_ZONA_NOMBRE].items():
+        if str(val).strip().upper() == target_upper:
+            match_idx = idx
+            break
+
+    if match_idx is None:
+        canonical = getattr(config, "VENDOR_ALIAS", {}).get(worker_name) or getattr(config, "VENDOR_ALIAS", {}).get(target_upper)
+        if canonical:
+            can_upper = canonical.strip().upper()
+            for idx, val in df[config.COL_ZONA_NOMBRE].items():
+                if str(val).strip().upper() == can_upper:
+                    match_idx = idx
+                    break
+
+    if match_idx is None:
+        return False, f"Trabajador '{worker_name}' no encontrado en zonas.xlsx."
+
+    actual_name = df.at[match_idx, config.COL_ZONA_NOMBRE]
+    df.at[match_idx, "Rol"] = role_clean
+
+    if new_region and new_region.strip():
+        reg_clean = new_region.strip().upper()
+        if config.COL_ZONA_REGION in df.columns:
+            df.at[match_idx, config.COL_ZONA_REGION] = reg_clean
+
+    # Si se asciende a coordinador y su código es VMMC, opcionalmente ajustar o conservar
+    cod_actual = str(df.at[match_idx, config.COL_ZONA_CODIGO] if config.COL_ZONA_CODIGO in df.columns else "")
+    if role_clean == "Coordinador" and cod_actual.startswith("VMMC"):
+        # Podemos asignar un CMMC si no lo tiene
+        pass
+
+    try:
+        df.to_excel(zonas_path, index=False, engine="openpyxl")
+        logger.info("Rol actualizado para '%s': %s (Región: %s)", actual_name, role_clean, new_region or "sin cambios")
+        reg_info = f" (Región: {new_region})" if new_region else ""
+        return True, f"'{actual_name}' ahora tiene el rol de {role_clean}{reg_info}."
+    except Exception as exc:
+        return False, f"Error al guardar cambio de rol en {zonas_path.name}: {exc}"
 
 
 def update_worker_email(

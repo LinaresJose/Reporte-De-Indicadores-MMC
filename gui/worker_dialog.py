@@ -1,8 +1,12 @@
-"""gui/worker_dialog.py — Ventana de Gestión y Modificación de Correos de Trabajadores.
+"""gui/worker_dialog.py — Ventana de Gestión y Modificación de Trabajadores (Correos y Rol de Coordinador).
 
-Permite buscar rápidamente cualquier trabajador (vendedor o coordinador),
-ver sus metas del mes y actualizar de manera inmediata y persistente
-su correo electrónico en data/zonas.xlsx.
+Permite:
+1. Buscar rápidamente cualquier trabajador (vendedor o coordinador).
+2. Ver sus metas del mes, correo actual y región.
+3. Modificar su correo electrónico de destino.
+4. Asignar o cambiar el rol de un trabajador a Coordinador (o revertirlo a Vendedor)
+   y definir su región para que le llegue automáticamente el reporte regional de su zona.
+5. Descargar el directorio completo en Excel.
 """
 
 from __future__ import annotations
@@ -13,17 +17,19 @@ from tkinter import filedialog, messagebox, ttk
 import tkinter as tk
 from typing import Any, Callable, Dict, List, Optional
 
+import config
 from services.worker_directory import (
     export_workers_directory_excel,
     get_workers_directory_data,
     update_worker_email,
+    update_worker_role,
 )
 
 logger = logging.getLogger(__name__)
 
 
 class WorkerEmailDialog(tk.Toplevel):
-    """Ventana emergente para consultar trabajadores, metas y modificar correos."""
+    """Ventana emergente para consultar trabajadores, metas y modificar correos y roles."""
 
     def __init__(
         self,
@@ -35,9 +41,9 @@ class WorkerEmailDialog(tk.Toplevel):
     ) -> None:
         super().__init__(parent)
 
-        self.title("Directorio y Modificación de Correos — MMC")
-        self.geometry("980x620")
-        self.minsize(820, 500)
+        self.title("Directorio y Gestión de Trabajadores (Correos y Roles) — MMC")
+        self.geometry("1020x670")
+        self.minsize(880, 540)
         self.transient(parent)
         self.grab_set()
 
@@ -55,6 +61,8 @@ class WorkerEmailDialog(tk.Toplevel):
         self._selected_nombre_var = tk.StringVar(value="(Ningún trabajador seleccionado)")
         self._selected_role_var = tk.StringVar(value="")
         self._email_edit_var = tk.StringVar()
+        self._role_edit_var = tk.StringVar(value="Comercial / Vendedor")
+        self._region_edit_var = tk.StringVar(value="CAPITAL")
 
         self._build_ui()
         self._load_data()
@@ -67,14 +75,17 @@ class WorkerEmailDialog(tk.Toplevel):
 
         ttk.Label(
             top_frame,
-            text="Directorio de Trabajadores, Correos y Metas del Mes",
+            text="Directorio de Trabajadores, Correos y Asignación de Coordinadores",
             font=("Segoe UI", 12, "bold"),
             foreground="#1F3864",
         ).pack(anchor="w")
 
         ttk.Label(
             top_frame,
-            text="Seleccione un trabajador de la lista para modificar su correo electrónico o descargue el archivo consolidado en Excel.",
+            text=(
+                "Seleccione un trabajador para modificar su correo o asignar/cambiar su rol de Coordinador/Vendedor.\n"
+                "A los Coordinadores se les envía automáticamente el Reporte Regional en Excel de la zona/región asignada."
+            ),
             font=("Segoe UI", 9),
             foreground="#555555",
         ).pack(anchor="w", pady=(2, 8))
@@ -84,7 +95,7 @@ class WorkerEmailDialog(tk.Toplevel):
         search_frame.pack(fill="x", pady=2)
 
         ttk.Label(search_frame, text="🔍 Buscar trabajador:", width=18, anchor="w").pack(side="left")
-        search_entry = ttk.Entry(search_frame, textvariable=self._search_var, width=35)
+        search_entry = ttk.Entry(search_frame, textvariable=self._search_var, width=32)
         search_entry.pack(side="left", padx=(0, 10))
         search_entry.focus_set()
 
@@ -113,22 +124,22 @@ class WorkerEmailDialog(tk.Toplevel):
         self._tree.heading("nombre", text="Nombre del Trabajador", anchor="w")
         self._tree.heading("rol", text="Rol / Cargo", anchor="w")
         self._tree.heading("zona", text="Zona", anchor="center")
-        self._tree.heading("region", text="Región", anchor="w")
+        self._tree.heading("region", text="Región Asignada", anchor="w")
         self._tree.heading("correo", text="Correo Electrónico Actual", anchor="w")
         self._tree.heading("estado", text="Estado Correo", anchor="center")
         self._tree.heading("meta_ventas", text="Meta Ventas ($)", anchor="e")
         self._tree.heading("meta_act", text="Meta Act.", anchor="e")
         self._tree.heading("meta_skus", text="Meta SKUs", anchor="e")
 
-        self._tree.column("nombre", width=240, anchor="w")
-        self._tree.column("rol", width=150, anchor="w")
-        self._tree.column("zona", width=60, anchor="center")
-        self._tree.column("region", width=100, anchor="w")
-        self._tree.column("correo", width=220, anchor="w")
-        self._tree.column("estado", width=110, anchor="center")
-        self._tree.column("meta_ventas", width=110, anchor="e")
-        self._tree.column("meta_act", width=80, anchor="e")
-        self._tree.column("meta_skus", width=80, anchor="e")
+        self._tree.column("nombre", width=230, anchor="w")
+        self._tree.column("rol", width=155, anchor="w")
+        self._tree.column("zona", width=55, anchor="center")
+        self._tree.column("region", width=115, anchor="w")
+        self._tree.column("correo", width=210, anchor="w")
+        self._tree.column("estado", width=105, anchor="center")
+        self._tree.column("meta_ventas", width=105, anchor="e")
+        self._tree.column("meta_act", width=75, anchor="e")
+        self._tree.column("meta_skus", width=75, anchor="e")
 
         scroll_y = ttk.Scrollbar(tree_frame, orient="vertical", command=self._tree.yview)
         self._tree.configure(yscrollcommand=scroll_y.set)
@@ -139,39 +150,71 @@ class WorkerEmailDialog(tk.Toplevel):
 
         # Tags para colores
         self._tree.tag_configure("warn", background="#FCE4D6", foreground="#9C0006")
+        self._tree.tag_configure("coord", background="#E8F4F8", foreground="#003366")
         self._tree.tag_configure("ok", background="#FFFFFF", foreground="#000000")
         self._tree.tag_configure("alt", background="#F7FAFC", foreground="#000000")
 
         # Edit panel at bottom
-        edit_frame = ttk.LabelFrame(self, text="Modificar Correo del Trabajador Seleccionado", padding=(12, 8))
-        edit_frame.pack(fill="x", padx=12, pady=(6, 12))
+        edit_frame = ttk.LabelFrame(self, text="Editar Datos del Trabajador Seleccionado (Correo y Rol de Coordinador)", padding=(12, 8))
+        edit_frame.pack(fill="x", padx=12, pady=(6, 10))
 
         info_row = ttk.Frame(edit_frame)
         info_row.pack(fill="x", pady=2)
 
-        ttk.Label(info_row, text="Trabajador:", width=14, anchor="w", font=("Segoe UI", 9, "bold")).pack(side="left")
+        ttk.Label(info_row, text="Trabajador:", width=12, anchor="w", font=("Segoe UI", 9, "bold")).pack(side="left")
         ttk.Label(info_row, textvariable=self._selected_nombre_var, font=("Segoe UI", 9, "bold"), foreground="#1F3864").pack(side="left")
         ttk.Label(info_row, textvariable=self._selected_role_var, font=("Segoe UI", 9, "italic"), foreground="#555555").pack(side="left", padx=10)
 
-        edit_row = ttk.Frame(edit_frame)
-        edit_row.pack(fill="x", pady=(6, 4))
+        # Fields row: Correo, Rol, Región
+        fields_row = ttk.Frame(edit_frame)
+        fields_row.pack(fill="x", pady=(6, 4))
 
-        ttk.Label(edit_row, text="Correo Destino:", width=14, anchor="w").pack(side="left")
-        self._entry_email = ttk.Entry(edit_row, textvariable=self._email_edit_var, width=36)
-        self._entry_email.pack(side="left", padx=(0, 10))
-        self._entry_email.bind("<Return>", lambda event: self._save_email())
+        # Correo
+        ttk.Label(fields_row, text="Correo:", width=8, anchor="w").pack(side="left")
+        self._entry_email = ttk.Entry(fields_row, textvariable=self._email_edit_var, width=28)
+        self._entry_email.pack(side="left", padx=(0, 15))
+        self._entry_email.bind("<Return>", lambda event: self._save_changes())
 
+        # Rol Combobox
+        ttk.Label(fields_row, text="Rol:", width=5, anchor="w").pack(side="left")
+        self._role_combo = ttk.Combobox(
+            fields_row,
+            textvariable=self._role_edit_var,
+            values=["Comercial / Vendedor", "Coordinador / Supervisor"],
+            state="readonly",
+            width=22,
+        )
+        self._role_combo.pack(side="left", padx=(0, 15))
+
+        # Región Combobox (por si es coordinador o se cambia de región)
+        ttk.Label(fields_row, text="Región:", width=8, anchor="w").pack(side="left")
+        region_values = list(config.REGIONES)
+        if "GERENCIA" not in region_values:
+            region_values.append("GERENCIA")
+        if "TVENTAS" not in region_values:
+            region_values.append("TVENTAS")
+
+        self._region_combo = ttk.Combobox(
+            fields_row,
+            textvariable=self._region_edit_var,
+            values=region_values,
+            state="readonly",
+            width=16,
+        )
+        self._region_combo.pack(side="left", padx=(0, 15))
+
+        # Botón Guardar
         self._btn_save = ttk.Button(
-            edit_row,
-            text="💾 Guardar Correo",
-            command=self._save_email,
+            fields_row,
+            text="💾 Guardar Cambios",
+            command=self._save_changes,
             width=18,
             style="Accent.TButton",
         )
-        self._btn_save.pack(side="left", padx=(0, 15))
+        self._btn_save.pack(side="left", padx=(0, 10))
 
-        self._save_status_lbl = ttk.Label(edit_row, text="", font=("Segoe UI", 9))
-        self._save_status_lbl.pack(side="left")
+        self._save_status_lbl = ttk.Label(edit_frame, text="", font=("Segoe UI", 9))
+        self._save_status_lbl.pack(anchor="w", pady=(2, 0))
 
         # Actions row (Excel and Close)
         actions_frame = ttk.Frame(self, padding=(12, 0, 12, 10))
@@ -224,9 +267,17 @@ class WorkerEmailDialog(tk.Toplevel):
 
         total_con_correo = sum(1 for r in self._filtered_records if r["tiene_correo"])
         total_sin_correo = len(self._filtered_records) - total_con_correo
+        total_coords = sum(1 for r in self._filtered_records if "coord" in r["rol"].lower() or "superv" in r["rol"].lower())
 
         for idx, r in enumerate(self._filtered_records):
-            tag = "warn" if not r["tiene_correo"] else ("alt" if idx % 2 == 0 else "ok")
+            is_c = "coord" in r["rol"].lower() or "superv" in r["rol"].lower()
+            if not r["tiene_correo"]:
+                tag = "warn"
+            elif is_c:
+                tag = "coord"
+            else:
+                tag = "alt" if idx % 2 == 0 else "ok"
+
             mv_str = f"${r['meta_ventas']:,.2f}" if r["meta_ventas"] > 0 else "-"
             ma_str = f"{int(r['meta_activacion'])}" if r["meta_activacion"] > 0 else "-"
             ms_str = f"{int(r['meta_skus'])}" if r["meta_skus"] > 0 else "-"
@@ -250,7 +301,7 @@ class WorkerEmailDialog(tk.Toplevel):
             )
 
         self._stats_lbl.config(
-            text=f"Total: {len(self._filtered_records)} | Con correo: {total_con_correo} | Sin correo: {total_sin_correo}"
+            text=f"Total: {len(self._filtered_records)} | Coordinadores: {total_coords} | Con correo: {total_con_correo} | Sin correo: {total_sin_correo}"
         )
 
     def _on_search_change(self, *args) -> None:
@@ -264,51 +315,77 @@ class WorkerEmailDialog(tk.Toplevel):
             return
 
         worker_name = selected[0]
-        # Buscar en los registros
         match = next((r for r in self._all_records if r["nombre"] == worker_name), None)
         if match:
             self._selected_nombre_var.set(match["nombre"])
-            self._selected_role_var.set(f"({match['rol']} — Zona {match['zona'] or 'N/A'}, {match['region']})")
+            self._selected_role_var.set(f"(Zona {match['zona'] or 'N/A'}, {match['region']})")
             self._email_edit_var.set(match["correo"])
+
+            is_c = "coord" in match["rol"].lower() or "superv" in match["rol"].lower()
+            self._role_edit_var.set("Coordinador / Supervisor" if is_c else "Comercial / Vendedor")
+            self._region_edit_var.set(match["region"] or "CAPITAL")
+
             self._save_status_lbl.config(text="")
             self._entry_email.focus_set()
 
-    def _save_email(self) -> None:
-        """Guarda el nuevo correo en zonas.xlsx y actualiza la tabla."""
+    def _save_changes(self) -> None:
+        """Guarda tanto el correo como el rol y región en data/zonas.xlsx."""
         worker_name = self._selected_nombre_var.get()
         if not worker_name or worker_name == "(Ningún trabajador seleccionado)":
             messagebox.showwarning("Atención", "Por favor seleccione un trabajador de la lista.", parent=self)
             return
 
         new_email = self._email_edit_var.get().strip()
+        new_role = self._role_edit_var.get()
+        new_region = self._region_edit_var.get()
 
-        ok, msg = update_worker_email(self._zonas_path, worker_name, new_email)
-        if ok:
-            self._save_status_lbl.config(text="✔ Guardado con éxito", foreground="#006400")
+        # 1. Guardar correo
+        ok_email, msg_email = update_worker_email(self._zonas_path, worker_name, new_email)
+        if not ok_email:
+            self._save_status_lbl.config(text="✖ Error en correo", foreground="#CC0000")
             if self._on_log:
-                self._on_log(f"✔ {msg}", "SUCCESS")
+                self._on_log(f"✖ {msg_email}", "ERROR")
+            messagebox.showerror("Error de Correo", msg_email, parent=self)
+            return
 
-            # Actualizar en memoria
-            for r in self._all_records:
-                if r["nombre"] == worker_name:
-                    r["correo"] = new_email
-                    r["tiene_correo"] = bool(new_email and "@" in new_email)
-                    r["estado_correo"] = "Válido" if r["tiene_correo"] else "⚠ FALTA CORREO"
-                    break
-
-            # Re-aplicar filtro para actualizar la tabla
-            self._apply_filter()
-            # Restaurar selección
-            if self._tree.exists(worker_name):
-                self._tree.selection_set(worker_name)
-                self._tree.see(worker_name)
-
-            messagebox.showinfo("Correo Actualizado", msg, parent=self)
-        else:
-            self._save_status_lbl.config(text="✖ Error al guardar", foreground="#CC0000")
+        # 2. Guardar rol y región
+        target_role = "Coordinador" if "coord" in new_role.lower() else "Vendedor"
+        ok_role, msg_role = update_worker_role(
+            self._zonas_path,
+            worker_name,
+            new_role=target_role,
+            new_region=new_region,
+        )
+        if not ok_role:
+            self._save_status_lbl.config(text="✖ Error en rol", foreground="#CC0000")
             if self._on_log:
-                self._on_log(f"✖ {msg}", "ERROR")
-            messagebox.showerror("Error", msg, parent=self)
+                self._on_log(f"✖ {msg_role}", "ERROR")
+            messagebox.showerror("Error de Rol", msg_role, parent=self)
+            return
+
+        # Éxito general
+        success_msg = f"Cambios guardados para '{worker_name}':\n• Correo: {new_email or '(Sin correo)'}\n• Rol: {new_role}\n• Región: {new_region}"
+        self._save_status_lbl.config(text=f"✔ Guardado: {new_role} ({new_region})", foreground="#006400")
+        if self._on_log:
+            self._on_log(f"✔ Actualizado {worker_name}: {new_role} [{new_region}] — {new_email}", "SUCCESS")
+
+        # Actualizar registros en memoria
+        for r in self._all_records:
+            if r["nombre"] == worker_name:
+                r["correo"] = new_email
+                r["tiene_correo"] = bool(new_email and "@" in new_email)
+                r["estado_correo"] = "Válido" if r["tiene_correo"] else "⚠ FALTA CORREO"
+                r["rol"] = new_role
+                r["region"] = new_region
+                break
+
+        # Re-aplicar filtro y mantener selección
+        self._apply_filter()
+        if self._tree.exists(worker_name):
+            self._tree.selection_set(worker_name)
+            self._tree.see(worker_name)
+
+        messagebox.showinfo("Trabajador Actualizado", success_msg, parent=self)
 
     def _export_excel(self) -> None:
         """Exporta el directorio a un archivo Excel seleccionado por el usuario."""

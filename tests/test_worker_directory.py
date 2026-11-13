@@ -10,6 +10,7 @@ from services.worker_directory import (
     get_workers_directory_data,
     export_workers_directory_excel,
     update_worker_email,
+    update_worker_role,
 )
 
 
@@ -125,3 +126,24 @@ def test_update_worker_email(sample_data_paths):
     ok_inv, msg_inv = update_worker_email(zonas_file, "CARLOS PEREZ (CARACAS)", "correo-sin-arroba")
     assert ok_inv is False
     assert "no es un correo electrónico válido" in msg_inv
+
+
+def test_update_worker_role(sample_data_paths):
+    zonas_file, _ = sample_data_paths
+
+    # Promote vendor to coordinator
+    ok, msg = update_worker_role(zonas_file, "CARLOS PEREZ (CARACAS)", "Coordinador", new_region="CENTRO")
+    assert ok is True
+    assert "coordinador" in msg.lower()
+
+    df = pd.read_excel(zonas_file)
+    row = df[df["Nombre"] == "CARLOS PEREZ (CARACAS)"].iloc[0]
+    assert row["Rol"] == "Coordinador"
+    assert row["Región"] == "CENTRO"
+
+    # Revert back to vendor
+    ok_rev, msg_rev = update_worker_role(zonas_file, "CARLOS PEREZ (CARACAS)", "Vendedor")
+    assert ok_rev is True
+    df_rev = pd.read_excel(zonas_file)
+    row_rev = df_rev[df_rev["Nombre"] == "CARLOS PEREZ (CARACAS)"].iloc[0]
+    assert row_rev["Rol"] == "Vendedor"

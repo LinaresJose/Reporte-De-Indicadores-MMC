@@ -131,7 +131,7 @@ def map_vendors_to_pdfs_and_emails(
 # ---------------------------------------------------------------------------
 
 #: Keywords that identify a coordinator/supervisor row in zonas.xlsx.
-_COORD_KEYWORDS = ("COORD", "SUPERVISOR")
+_COORD_KEYWORDS = ("COORD", "COOR", "SUPERVISOR", "COORDINADOR")
 
 #: Emails of the company owners / gerencia — they receive the General Excel.
 OWNER_EMAILS: frozenset[str] = frozenset({
@@ -196,9 +196,15 @@ def build_coordinator_extra_attachments(
         correo = str(row.get("correo", "") or "").strip()
         region = str(row.get("región", "") or row.get("regin", "") or row.get("region", "") or "").strip().upper()
 
-        # Skip rows that are not coordinator/supervisor, or lack email
-        is_coord = any(kw in nombre for kw in _COORD_KEYWORDS)
-        is_gerencia = "GERENCIA" in nombre
+        rol_val = str(row.get("rol", "") or "").strip().lower()
+        cod_val = str(row.get("codigo", "") or row.get("código", "") or "").strip().upper()
+        is_coord = (
+            "coord" in rol_val
+            or "superv" in rol_val
+            or cod_val.startswith("CMMC")
+            or any(kw in nombre for kw in _COORD_KEYWORDS)
+        )
+        is_gerencia = "geren" in rol_val or "direct" in rol_val or "GERENCIA" in nombre or cod_val.startswith("GMMC")
         if not is_coord or is_gerencia or not correo or "@" not in correo:
             continue
 
@@ -269,8 +275,15 @@ def get_coordinator_dests(
         zona = str(row.get("zona", "") or "").strip()
         region = str(row.get("región", "") or row.get("regin", "") or row.get("region", "") or "").strip().upper()
 
-        is_coord = any(kw in nombre_up for kw in _COORD_KEYWORDS)
-        is_gerencia = "GERENCIA" in nombre_up
+        rol_val = str(row.get("rol", "") or "").strip().lower()
+        cod_val = str(row.get("codigo", "") or row.get("código", "") or "").strip().upper()
+        is_coord = (
+            "coord" in rol_val
+            or "superv" in rol_val
+            or cod_val.startswith("CMMC")
+            or any(kw in nombre_up for kw in _COORD_KEYWORDS)
+        )
+        is_gerencia = "geren" in rol_val or "direct" in rol_val or "GERENCIA" in nombre_up or cod_val.startswith("GMMC")
         if not is_coord or is_gerencia or not correo or "@" not in correo:
             continue
 
