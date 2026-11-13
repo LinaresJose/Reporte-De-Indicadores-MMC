@@ -192,6 +192,7 @@ class LynxApp(tk.Tk):
             prog_frame, mode="indeterminate", length=200
         )
         self._progressbar.pack(side="right", padx=(0, 4))
+        self._progress_bar = self._progressbar  # alias for backward compatibility
 
         # Log area
         log_frame = SectionFrame(bottom, "Registro de Eventos")
@@ -443,6 +444,13 @@ class LynxApp(tk.Tk):
         send_frame = SectionFrame(self._tab_email, "3. Envío y Pruebas")
         send_frame.pack(fill="x", pady=(0, 10))
 
+        # Selector de carpeta de reportes / PDFs
+        row_dir = ttk.Frame(send_frame)
+        row_dir.pack(fill="x", pady=(2, 6))
+        ttk.Label(row_dir, text="Carpeta de Reportes:", width=20, anchor="w").pack(side="left")
+        ttk.Entry(row_dir, textvariable=self._output_var, state="readonly").pack(side="left", fill="x", expand=True, padx=5)
+        ttk.Button(row_dir, text="Cambiar...", command=self._browse_output_dir, width=12).pack(side="left")
+
         row_actions = ttk.Frame(send_frame)
         row_actions.pack(fill="x", pady=4)
 
@@ -609,124 +617,157 @@ class LynxApp(tk.Tk):
         Sends individual PDFs to all vendors in the manifest, plus the regional
         Excel file to each coordinator/supervisor found in zonas.xlsx.
         """
-        if not self._email_pass_var.get().strip():
-            messagebox.showwarning("Falta Contraseña", "Ingrese la Contraseña de Aplicación de Gmail.", parent=self)
-            return
+        try:
+            if not self._email_pass_var.get().strip():
+                messagebox.showwarning("Falta Contraseña", "Ingrese la Contraseña de Aplicación de Gmail.", parent=self)
+                return
 
-        out_dir = self._get_active_output_dir()
-        manifest_path = out_dir / "manifest_indicadores_vendedores.csv"
-        if not manifest_path.exists():
-            alt_m = out_dir / "manifest_vendedores.csv" / "manifest_indicadores_vendedores.csv"
-            if alt_m.exists():
-                manifest_path = alt_m
+            out_dir = self._get_active_output_dir()
+            manifest_path = out_dir / "manifest_indicadores_vendedores.csv"
+            if not manifest_path.exists():
+                alt_m = out_dir / "manifest_vendedores.csv" / "manifest_indicadores_vendedores.csv"
+                if alt_m.exists():
+                    manifest_path = alt_m
 
-        if not manifest_path.exists():
-            messagebox.showwarning(
-                "Reportes no encontrados",
-                f"No se encontró el manifiesto de vendedores en:\n{out_dir}\n\n"
-                "Primero genere los reportes desde la pestaña 'Generar Reportes'.",
+            if not manifest_path.exists():
+                messagebox.showwarning(
+                    "Reportes no encontrados",
+                    f"No se encontró el manifiesto de vendedores en:\n{out_dir}\n\n"
+                    "Primero genere los reportes desde la pestaña 'Generar Reportes' o seleccione la carpeta donde están guardados.",
+                    parent=self,
+                )
+                return
+
+            zonas_path = Path("data/zonas.xlsx")
+            pdf_dir = out_dir / "PDF_INDICADORES"
+            regional_dir = out_dir / "REGIONALES"
+
+            # --- Vendor destinations from manifest ---
+            dests = map_vendors_to_pdfs_and_emails(manifest_path, zonas_path, pdf_dir)
+            listos = [d for d in dests if d["email"] and d["existe_pdf"] == "True"]
+
+            # --- Coordinator destinations (not in manifest) ---
+            coord_dests = get_coordinator_dests(zonas_path, regional_dir, pdf_dir)
+            coord_listos = [
+                d for d in coord_dests
+                if d["email"] and (d["existe_pdf"] == "True" or d.get("regional_excel"))
+            ]
+
+            # Combined list for the batch
+            todos = dests + coord_dests
+            total_listos = len(listos) + len(coord_listos)
+
+            if total_listos == 0:
+                messagebox.showwarning(
+                    "Sin destinatarios listos",
+                    f"Se leyeron {len(dests)} vendedores del manifiesto y {len(coord_dests)} coordinadores, "
+                    "pero ninguno tiene PDF/Excel y correo asignado.\n"
+                    "Verifique que los PDFs estén en la carpeta PDF_INDICADORES.",
+                    parent=self,
+                )
+                return
+
+            # --- General Excel for owners ---
+            excel_general = None
+            cand_excels = list(out_dir.glob("Reporte_General_*.xlsx")) + list(out_dir.glob("Reporte_General_*.xls"))
+            if cand_excels:
+                excel_general = cand_excels[0]
+
+            # --- Extra attachments for coordinators ---
+            extra_map = build_coordinator_extra_attachments(zonas_path, regional_dir)
+
+            duenos_info = f"\n(Se adjuntará también {excel_general.name} a los directores/dueños)" if excel_general else ""
+            coord_info = f"\n({len(coord_listos)} coordinadores recibirán además su Excel Regional)" if coord_listos else ""
+
+            confirm = messagebox.askyesno(
+                "Confirmar Envío Masivo",
+                f"Se enviarán correos a {len(listos)} vendedores y {len(coord_listos)} coordinadores.{duenos_info}{coord_info}\n\n"
+                f"Remitente: {self._email_sender_var.get()}\n"
+                f"Asunto: {self._email_subject_var.get()}\n\n"
+                "¿Desea iniciar el proceso de envío ahora?",
                 parent=self,
             )
-            return
+            if not confirm:
+                return
 
-        zonas_path = Path("data/zonas.xlsx")
-        pdf_dir = out_dir / "PDF_INDICADORES"
-        regional_dir = out_dir / "REGIONALES"
+            self._set_ui_busy(True)
+            self._progressbar["mode"] = "determinate"
+            self._progressbar["value"] = 0
+            self._progress_lbl.config(text=f"Iniciando envío a {total_listos} destinatarios...")
+            self._log(f"Iniciando proceso de envío masivo para {total_listos} destinatarios...", "INFO")
 
-        # --- Vendor destinations from manifest ---
-        dests = map_vendors_to_pdfs_and_emails(manifest_path, zonas_path, pdf_dir)
-        listos = [d for d in dests if d["email"] and d["existe_pdf"] == "True"]
-
-        # --- Coordinator destinations (not in manifest) ---
-        coord_dests = get_coordinator_dests(zonas_path, regional_dir, pdf_dir)
-        coord_listos = [
-            d for d in coord_dests
-            if d["email"] and (d["existe_pdf"] == "True" or d.get("regional_excel"))
-        ]
-
-        # Combined list for the batch
-        todos = dests + coord_dests
-        total_listos = len(listos) + len(coord_listos)
-
-        if total_listos == 0:
-            messagebox.showwarning(
-                "Sin destinatarios listos",
-                f"Se leyeron {len(dests)} vendedores del manifiesto y {len(coord_dests)} coordinadores, "
-                "pero ninguno tiene PDF/Excel y correo asignado.\n"
-                "Verifique que los PDFs estén en la carpeta PDF_INDICADORES.",
-                parent=self,
+            sender = EmailSender(
+                sender_email=self._email_sender_var.get(),
+                sender_password=self._email_pass_var.get(),
             )
-            return
+            subject = self._email_subject_var.get()
+            body = self._email_body_text.get("1.0", "end-1c")
 
-        # --- General Excel for owners ---
-        excel_general = None
-        cand_excels = list(out_dir.glob("Reporte_General_*.xlsx")) + list(out_dir.glob("Reporte_General_*.xls"))
-        if cand_excels:
-            excel_general = cand_excels[0]
-
-        duenos_info = f"\n(Se adjuntará también {excel_general.name} a los directores/dueños)" if excel_general else ""
-        coord_info = f"\n({len(coord_listos)} coordinadores recibirán además su Excel Regional)" if coord_listos else ""
-
-        confirm = messagebox.askyesno(
-            "Confirmar Envío Masivo",
-            f"Se enviarán correos a {len(listos)} vendedores y {len(coord_listos)} coordinadores.{duenos_info}{coord_info}\n\n"
-            f"Remitente: {self._email_sender_var.get()}\n"
-            f"Asunto: {self._email_subject_var.get()}\n\n"
-            "¿Desea iniciar el proceso de envío ahora?",
-            parent=self,
-        )
-        if not confirm:
-            return
-
-        self._set_ui_busy(True)
-        self._btn_send_all.config(state="disabled")
-
-        sender = EmailSender(
-            sender_email=self._email_sender_var.get(),
-            sender_password=self._email_pass_var.get(),
-        )
-        subject = self._email_subject_var.get()
-        body = self._email_body_text.get("1.0", "end-1c")
-
-        def worker():
-            try:
-                self._gui_queue.put(_Msg("log", (
-                    f"Iniciando envío — {len(listos)} vendedores + {len(coord_listos)} coordinadores...",
-                    "INFO",
-                )))
-                if excel_general:
-                    self._gui_queue.put(_Msg("log", (f"Excel General para dueños: {excel_general.name}", "INFO")))
-                if coord_listos:
+            def worker():
+                try:
                     self._gui_queue.put(_Msg("log", (
-                        f"Coordinadores con Excel Regional: {', '.join(d['nombre'] for d in coord_listos)}",
+                        f"Iniciando envío — {len(listos)} vendedores + {len(coord_listos)} coordinadores...",
                         "INFO",
                     )))
+                    if excel_general:
+                        self._gui_queue.put(_Msg("log", (f"Excel General para dueños: {excel_general.name}", "INFO")))
+                    if coord_listos:
+                        self._gui_queue.put(_Msg("log", (
+                            f"Coordinadores con Excel Regional: {', '.join(d['nombre'] for d in coord_listos)}",
+                            "INFO",
+                        )))
 
-                def on_prog(curr, tot, nom, ok, m):
-                    lvl = "SUCCESS" if ok else "WARNING"
-                    self._gui_queue.put(_Msg("progress", (curr, tot, f"Enviando {curr}/{tot}: {nom}")))
-                    self._gui_queue.put(_Msg("log", (f"[{curr}/{tot}] {nom} → {m}", lvl)))
+                    def on_prog(curr, tot, nom, ok, m):
+                        lvl = "SUCCESS" if ok else "WARNING"
+                        self._gui_queue.put(_Msg("progress", (curr, tot, f"Enviando {curr}/{tot}: {nom}")))
+                        self._gui_queue.put(_Msg("log", (f"[{curr}/{tot}] {nom} → {m}", lvl)))
 
-                stats = sender.send_batch(
-                    destinatarios=todos,
-                    subject=subject,
-                    body_template=body,
-                    general_excel_path=excel_general,
-                    on_progress=on_prog,
-                    delay_seconds=0.8,
-                )
-                self._gui_queue.put(_Msg("email_done", stats))
-            except Exception as exc:
-                logger.error("Error en hilo de envío de correos: %s", exc, exc_info=True)
-                self._gui_queue.put(_Msg("log", (f"Error crítico en envío de correos: {exc}", "ERROR")))
-                self._gui_queue.put(_Msg("email_done", {"enviados": 0, "fallidos": total_listos, "omitidos": 0}))
+                    stats = sender.send_batch(
+                        destinatarios=todos,
+                        subject=subject,
+                        body_template=body,
+                        general_excel_path=excel_general,
+                        extra_attachments=extra_map,
+                        on_progress=on_prog,
+                        delay_seconds=0.8,
+                    )
+                    self._gui_queue.put(_Msg("email_done", stats))
+                except Exception as exc:
+                    logger.error("Error en hilo de envío de correos: %s", exc, exc_info=True)
+                    self._gui_queue.put(_Msg("log", (f"Error crítico en envío de correos: {exc}", "ERROR")))
+                    self._gui_queue.put(_Msg("email_done", {"enviados": 0, "fallidos": total_listos, "omitidos": 0}))
 
-        t = threading.Thread(target=worker, daemon=True)
-        t.start()
+            t = threading.Thread(target=worker, daemon=True)
+            t.start()
+        except Exception as exc:
+            logger.error("Error al preparar envío masivo de correos: %s", exc, exc_info=True)
+            self._set_ui_busy(False)
+            self._log(f"Error al iniciar envío masivo: {exc}", "ERROR")
+            messagebox.showerror("Error", f"No se pudo iniciar el envío masivo:\n{exc}", parent=self)
 
     # ------------------------------------------------------------------
     # UI helpers
     # ------------------------------------------------------------------
+
+    def _set_ui_busy(self, busy: bool) -> None:
+        """Habilita o deshabilita controles interactivos durante tareas en segundo plano."""
+        state = "disabled" if busy else "normal"
+        cursor = "watch" if busy else ""
+        try:
+            self.config(cursor=cursor)
+        except Exception:
+            pass
+
+        if hasattr(self, "_btn_send_all"):
+            try:
+                self._btn_send_all.config(state=state)
+            except Exception:
+                pass
+        if hasattr(self, "_btn_run"):
+            try:
+                self._btn_run.config(state=state)
+            except Exception:
+                pass
 
     def _browse_output_dir(self) -> None:
         """Open a folder-picker and update the output directory entry."""
@@ -833,7 +874,7 @@ class LynxApp(tk.Tk):
                     if isinstance(msg.payload, tuple) and len(msg.payload) == 3:
                         curr, tot, text = msg.payload
                         pct = int((curr / tot) * 100) if tot > 0 else 0
-                        self._progress_bar["value"] = pct
+                        self._progressbar["value"] = pct
                         self._progress_lbl.config(text=text)
                     else:
                         self._progress_lbl.config(text=str(msg.payload))
@@ -1212,8 +1253,7 @@ class LynxApp(tk.Tk):
     def _on_email_done(self, stats: Dict[str, int]) -> None:
         """Callback ejecutado en el hilo principal cuando termina el envío masivo."""
         self._set_ui_busy(False)
-        self._btn_send_all.config(state="normal")
-        self._progress_bar["value"] = 100
+        self._progressbar["value"] = 100
         self._progress_lbl.config(text="Envío de correos completado.")
 
         resumen = (
@@ -1223,4 +1263,4 @@ class LynxApp(tk.Tk):
             f"⚠ Omitidos (sin correo o sin PDF): {stats.get('omitidos', 0)}"
         )
         self._log(resumen, "SUCCESS" if stats.get("fallidos", 0) == 0 else "WARNING")
-        messagebox.showinfo("Envío de Correos Finalizado", resumen)
+        messagebox.showinfo("Envío de Correos Finalizado", resumen, parent=self)
